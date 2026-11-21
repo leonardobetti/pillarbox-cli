@@ -100,7 +100,7 @@ func TestHomeLayoutShowsProposalChrome(t *testing.T) {
 	waitFor(t, tm, a, "Pillarbox", tagline,
 		"Encrypt", "Decrypt", "Status", "Settings", "Help",
 		"Select a file to encrypt",
-		"Tab, ← or → to navigate", "Enter to select", "Q to quit")
+		"to navigate", "to select", "to quit")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
@@ -282,7 +282,7 @@ func TestTwofaViewFits24Lines(t *testing.T) {
 	if len(lines) > 24 {
 		t.Fatalf("2FA view is %d lines, want <= 24", len(lines))
 	}
-	if !strings.Contains(v, "6-digit code") || !strings.Contains(v, "enter continue") {
+	if !strings.Contains(v, "6-digit code") || !strings.Contains(v, "continue") {
 		t.Fatal("2FA view lost the code entry or the footer")
 	}
 }
@@ -324,7 +324,7 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // Encrypt -> Decrypt -> Status -> Settings
 	}
-	waitFor(t, tm, a, "Key type:", "Require authentication to encrypt: no", "a apply")
+	waitFor(t, tm, a, "Key type:", "Require authentication to encrypt: no", "apply")
 
 	tm.Send(key(tea.KeyDown))                   // cursor -> auth-encrypt
 	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // toggle to yes
@@ -346,7 +346,7 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	// Tab must leave Settings for Help, not cycle options.
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	waitFor(t, tm, a, "Help", "Argon2id", "Leonardo Betti", "Nasser Khalil", "LLMs")
-	if !bytes.Contains(a.b, []byte("Q to quit")) {
+	if !bytes.Contains(a.b, []byte("to quit")) {
 		t.Fatal("footer missing during settings navigation")
 	}
 

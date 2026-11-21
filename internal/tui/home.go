@@ -42,11 +42,11 @@ var homeTabs = []string{"Encrypt", "Decrypt", "Status", "Settings", "Help"}
 
 const tagline = "Pillarbox encrypts and decrypts files from the terminal."
 
-const footerKeys = "Tab, ← or → to navigate  Enter to select  Q to quit  Backspace to change"
+const footerKeys = "{Tab}, {←} or {→} to navigate  {Enter} to select  {Q} to quit  {Backspace} to change"
 
 const helpIntro = "Pillarbox encrypts and decrypts files in the terminal. Your secret is stretched with Argon2id before the file is sealed with age. Free and open source, built by Leonardo Betti and Nasser Khalil with help from LLMs."
 
-const helpText = "Tab / ← / → switch tabs • ↑/↓ move in the box • enter select • backspace toggle setting or parent dir • a apply (settings) • q quit • ctrl+c abort"
+const helpText = "{Tab} / {←} / {→} switch tabs • {↑}/{↓} move in the box • {Enter} select • {Backspace} toggle setting or parent dir • {A} apply (settings) • {Q} quit • {Ctrl+C} abort"
 
 type promptDoneMsg struct {
 	action string
@@ -549,7 +549,7 @@ func (m *Home) resizeView() string {
 	fmt.Fprintf(&b, "Need at least %d×%d cells (~800×800px). Now %d×%d.",
 		minTermWidth, minTermHeight, m.width, m.height)
 	b.WriteString("\n\n")
-	b.WriteString(m.th.dim.Render("Resize the window, or press q to quit."))
+	b.WriteString(renderKeys(m.th, "Resize the window, or press {Q} to quit."))
 	w, h := m.width, m.height
 	if w <= 0 {
 		w = minTermWidth
@@ -588,7 +588,7 @@ func (m *Home) View() string {
 	body = clampLines(body, innerH)
 	b.WriteString(m.th.box.Width(innerW).Render(body))
 	b.WriteString("\n\n")
-	b.WriteString(m.th.dim.Render(footerKeys))
+	b.WriteString(renderKeys(m.th, footerKeys))
 	w, h := m.width, m.height
 	if w <= 0 {
 		w = minTermWidth
@@ -660,18 +660,18 @@ func (m *Home) contentBody(innerH int) string {
 		var b strings.Builder
 		b.WriteString("Settings\n\n")
 		for i, line := range []string{"Key type: " + keyType, "Require authentication to encrypt: " + auth} {
-			marker := "  "
 			if i == m.setCursor {
-				marker = "> "
+				b.WriteString("> " + m.th.selected.Render(line) + "\n")
+			} else {
+				b.WriteString("  " + line + "\n")
 			}
-			b.WriteString(marker + line + "\n")
 		}
-		b.WriteString("\n" + m.th.dim.Render("↑/↓ move • backspace toggle • a apply • tab next section"))
+		b.WriteString("\n" + renderKeys(m.th, "{↑}/{↓} move • {Backspace} toggle • {A} apply • {Tab} next section"))
 		return b.String()
 	case homeStatus:
 		return "Status\n\n" + m.statusText
 	case homeHelp:
-		return "Help\n\n" + helpIntro + "\n\n" + helpText
+		return "Help\n\n" + helpIntro + "\n\n" + renderKeys(m.th, helpText)
 	case homeResult:
 		if m.resultIsErr {
 			return m.th.errS.Render(m.result)
@@ -787,7 +787,7 @@ func (p *secretPrompt) ContentView() string {
 }
 
 func (p *secretPrompt) View() string {
-	return fit(p.ContentView()+"\n\n"+p.th.dim.Render("tab next field • enter continue • esc back • ctrl+c abort"), maxWidth, maxHeight)
+	return fit(p.ContentView()+"\n\n"+renderKeys(p.th, "{Tab} next field • {Enter} continue • {Esc} back • {Ctrl+C} abort"), maxWidth, maxHeight)
 }
 
 // twofaPrompt shows the QR code of the per-file TOTP seed and asks for one
@@ -871,5 +871,5 @@ func (p *twofaPrompt) ContentView() string {
 }
 
 func (p *twofaPrompt) View() string {
-	return fit(p.ContentView()+"\n\n"+p.th.dim.Render("enter continue • esc back • ctrl+c copy 2fa uri"), maxWidth, maxHeight)
+	return fit(p.ContentView()+"\n\n"+renderKeys(p.th, "{Enter} continue • {Esc} back • {Ctrl+C} copy 2fa uri"), maxWidth, maxHeight)
 }

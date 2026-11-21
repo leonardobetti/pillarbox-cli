@@ -1,8 +1,8 @@
 # ARCHITECTURE
 
 Interface design for the Pillarbox core. This document plus the three
-interface files are the whole change: no implementation. Sources: PRD
-sections 5 to 9 in `prd.md`.
+interface files are the whole change: no implementation. Based on
+the product requirements that guided v0.1.
 
 Goal: one person builds the core implementations (internal/keystore,
 internal/auth, internal/vault) while another builds internal/cli and
@@ -123,7 +123,7 @@ and never imports age; vault owns all age types and parses the recipient.
 
 ## Invariants every implementation must keep
 
-- Secrets never appear in argv, logs or errors (AGENTS.md). Prompts return
+- Secrets never appear in argv, logs or errors (repo conventions). Prompts return
   `[]byte`; error values carry no secret material; `ErrAuth` has a fixed
   message.
 - `keystore.Store` is the only writer of keystore.json; saves are atomic
@@ -149,4 +149,4 @@ needed to build or test cli and tui.
 ## Not in this change
 
 Implementations of the remaining interfaces above (keystore.Store, auth),
-the TUI models, and copying `prd.md` to `docs/PRD.md`.
+the TUI models, and keeping architecture notes here.
