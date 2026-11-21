@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"errors"
-
 	"filippo.io/age"
 	"github.com/spf13/cobra"
 
@@ -46,7 +44,7 @@ func (d *Deps) runInit(modeStr string, force bool) error {
 	if err != nil {
 		return err
 	}
-	if err := validateSecret(m, secret); err != nil {
+	if err := auth.ValidateSecret(m, secret); err != nil {
 		return &exitError{ExitUsage, "invalid secret: " + err.Error()}
 	}
 
@@ -93,25 +91,5 @@ func (d *Deps) runInit(modeStr string, force bool) error {
 		d.printf("keystore created at %s\n", d.Store.Path())
 	}
 	d.printf("recovery key (shown once): %s\n", identity.String())
-	return nil
-}
-
-// validateSecret enforces the PRD 6.2 length rules. The message never
-// contains the secret.
-func validateSecret(m keystore.Mode, s []byte) error {
-	if m.HasDeviceSecret() {
-		if len(s) < 6 || len(s) > 12 {
-			return errors.New("PIN must be 6 to 12 digits")
-		}
-		for _, c := range s {
-			if c < '0' || c > '9' {
-				return errors.New("PIN must be digits only")
-			}
-		}
-		return nil
-	}
-	if len(s) < 12 {
-		return errors.New("passphrase must be at least 12 characters")
-	}
 	return nil
 }

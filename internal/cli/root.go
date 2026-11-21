@@ -11,6 +11,7 @@ import (
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
 	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
+	"github.com/leonardobetti/pillarbox-cli/internal/tui"
 	"github.com/leonardobetti/pillarbox-cli/internal/vault"
 )
 
@@ -148,14 +149,45 @@ func newRoot(d *Deps) *cobra.Command {
 	return cmd
 }
 
-// runRoot handles bare pillarbox. Without a keystore it exits 5 with the PRD
-// 8.1 hint; with one it prints help until the TUI home menu lands.
+// runRoot handles bare pillarbox, PRD 8.1 and 8.2. On a terminal without
+// --no-tui it runs onboarding when the keystore is missing and the home menu
+// otherwise; non-interactive it exits 5 or prints help.
 func (d *Deps) runRoot(cmd *cobra.Command) error {
 	exists, err := d.Store.Exists()
+	if err == nil && !exists && d.interactive() {
+		if _, terr := tui.RunOnboarding(d.tuiDeps()); terr == nil {
+			exists, _ = d.Store.Exists()
+		}
+	}
 	if err == nil && !exists {
 		return &exitError{ExitKeystore, "no keystore; run pillarbox init"}
 	}
+	if d.interactive() {
+		if _, terr := tui.RunHome(d.tuiDeps()); terr != nil {
+			return &exitError{ExitOther, "the interactive UI exited with an error"}
+		}
+		return nil
+	}
 	return cmd.Help()
+}
+
+// interactive reports whether a TUI may run: a terminal on stdin and stdout
+// and no --no-tui.
+func (d *Deps) interactive() bool {
+	return !d.opts.noTUI && isTerminal(d.Stdin) && isTerminalWriter(d.Stdout)
+}
+
+func (d *Deps) tuiDeps() *tui.Deps {
+	return &tui.Deps{
+		Store:    d.Store,
+		Wrapper:  d.Wrapper,
+		KDF:      d.KDF,
+		TOTP:     d.TOTP,
+		DevStore: d.DevStore,
+		Vault:    d.Vault,
+		Version:  Version,
+		StartDir: ".",
+	}
 }
 
 // printf and println write informational output; a failed write to stdout is
@@ -185,9 +217,15 @@ func exactArgs(n int, usage string) cobra.PositionalArgs {
 }
 
 // loadKeystore loads the keystore and maps missing or invalid to exit 5, PRD
-// 8.1 and 9.
+// 8.1 and 9. On a terminal it starts onboarding first when the keystore is
+// missing, PRD 8.1.
 func (d *Deps) loadKeystore() (*keystore.Keystore, error) {
 	ks, err := d.Store.Load()
+	if (errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid)) && d.interactive() {
+		if _, terr := tui.RunOnboarding(d.tuiDeps()); terr == nil {
+			ks, err = d.Store.Load()
+		}
+	}
 	if errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid) {
 		return nil, &exitError{ExitKeystore, "keystore missing or invalid; run pillarbox init"}
 	}
