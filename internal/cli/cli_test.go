@@ -262,6 +262,22 @@ func TestCommandsTable(t *testing.T) {
 			wantErr:  "integrity",
 		},
 		{
+			name: "unlock to missing output dir exits 1 not 4",
+			setup: func(t *testing.T, e *env) {
+				e.setupLocked(t, "password", testSecret)
+			},
+			args: func(t *testing.T, e *env) []string {
+				return []string{"unlock", e.pbx, "-o", filepath.Join(e.dir, "no-such-dir", "out.txt"), "--no-tui", "--secret-stdin"}
+			},
+			stdin:    testSecret + "\n",
+			wantExit: ExitOther,
+			check: func(t *testing.T, e *env, out, errOut string) {
+				if strings.Contains(errOut, "integrity") {
+					t.Fatalf("infrastructure error reported as integrity: %q", errOut)
+				}
+			},
+		},
+		{
 			name: "unlock without secret input exits 2",
 			setup: func(t *testing.T, e *env) {
 				e.setupLocked(t, "password", testSecret)

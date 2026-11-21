@@ -15,6 +15,16 @@ var ErrIntegrity = errors.New("integrity failure")
 // 7.4 step 3. cli maps it to exit code 2.
 var ErrExists = errors.New("output exists")
 
+// streamErr marks an error raised inside the decrypt/extract callback as a
+// stream failure. Infrastructure errors from writeAtomic itself (temp file
+// creation, fsync, rename) stay plain I/O errors, so cli never reports an
+// unwritable output directory as an integrity failure (exit code 4 is
+// reserved for actual tampering, PRD section 9).
+type streamErr struct{ err error }
+
+func (e streamErr) Error() string { return e.err.Error() }
+func (e streamErr) Unwrap() error { return e.err }
+
 // LockOptions mirrors the lock flags, PRD section 9.
 type LockOptions struct {
 	Out            string // -o; default <name>.pbx for a file, <dir>.tar.pbx for a folder

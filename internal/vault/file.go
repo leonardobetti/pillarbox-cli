@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -116,13 +117,19 @@ func (v ageVault) unlockFile(src string, identity age.Identity, opts UnlockOptio
 	err = writeAtomic(dst, func(w io.Writer) error {
 		dec, err := age.Decrypt(in, identity)
 		if err != nil {
-			return err
+			return streamErr{err}
 		}
-		_, err = io.Copy(w, dec)
-		return err
+		if _, err := io.Copy(w, dec); err != nil {
+			return streamErr{err}
+		}
+		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrIntegrity, err)
+		var se streamErr
+		if errors.As(err, &se) {
+			return "", fmt.Errorf("%w: %v", ErrIntegrity, se.err)
+		}
+		return "", err
 	}
 	return dst, nil
 }

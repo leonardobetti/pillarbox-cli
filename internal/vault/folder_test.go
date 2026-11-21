@@ -239,3 +239,28 @@ func TestFolderEmptySubfolderRoundTrip(t *testing.T) {
 		t.Fatalf("empty subfolder missing after round trip: %v", err)
 	}
 }
+
+// TestUnlockFolderOutputDirMissingIsNotIntegrity guards the exit-code
+// contract of PRD section 9 for the folder path: a temp directory that
+// cannot be created must not surface as ErrIntegrity (exit code 4).
+func TestUnlockFolderOutputDirMissingIsNotIntegrity(t *testing.T) {
+	base := t.TempDir()
+	src := filepath.Join(base, "project")
+	buildFolderTree(t, src)
+
+	v := New()
+	id := newIdentity(t)
+	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	out := filepath.Join(base, "no-such-dir", "out")
+	_, err = v.Unlock(dst, id, UnlockOptions{Out: out})
+	if err == nil {
+		t.Fatal("Unlock into missing directory: want error, got nil")
+	}
+	if errors.Is(err, ErrIntegrity) {
+		t.Fatalf("infrastructure error misclassified as integrity: %v", err)
+	}
+}

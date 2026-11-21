@@ -355,3 +355,29 @@ func TestStockAgeBinaryDecrypts(t *testing.T) {
 		t.Fatal("stock age output differs from original")
 	}
 }
+
+// TestUnlockFileOutputDirMissingIsNotIntegrity guards the exit-code
+// contract of PRD section 9: an infrastructure failure (here, a temp file
+// that cannot be created because the output directory does not exist) must
+// not be reported as ErrIntegrity, which cli maps to exit code 4.
+func TestUnlockFileOutputDirMissingIsNotIntegrity(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "secret.txt")
+	writeFile(t, src, []byte("data\n"))
+
+	v := New()
+	id := newIdentity(t)
+	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	out := filepath.Join(dir, "no-such-dir", "out")
+	_, err = v.Unlock(dst, id, UnlockOptions{Out: out})
+	if err == nil {
+		t.Fatal("Unlock into missing directory: want error, got nil")
+	}
+	if errors.Is(err, ErrIntegrity) {
+		t.Fatalf("infrastructure error misclassified as integrity: %v", err)
+	}
+}

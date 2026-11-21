@@ -77,15 +77,22 @@ func (v ageVault) unlockFolder(src string, identity age.Identity, opts UnlockOpt
 	err = writeAtomicDir(dst, func(tmp string) error {
 		dec, err := age.Decrypt(in, identity)
 		if err != nil {
-			return err
+			return streamErr{err}
 		}
-		return v.x.Extract(dec, tmp, archive.ExtractOptions{Force: opts.Force})
+		if err := v.x.Extract(dec, tmp, archive.ExtractOptions{Force: opts.Force}); err != nil {
+			return streamErr{err}
+		}
+		return nil
 	})
 	if err != nil {
-		if errors.Is(err, archive.ErrExists) {
-			return "", fmt.Errorf("%w: %v", ErrExists, err)
+		var se streamErr
+		if errors.As(err, &se) {
+			if errors.Is(se.err, archive.ErrExists) {
+				return "", fmt.Errorf("%w: %v", ErrExists, se.err)
+			}
+			return "", fmt.Errorf("%w: %v", ErrIntegrity, se.err)
 		}
-		return "", fmt.Errorf("%w: %v", ErrIntegrity, err)
+		return "", err
 	}
 	return dst, nil
 }

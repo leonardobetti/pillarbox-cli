@@ -1,0 +1,22 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-11-21
+
+### Added
+
+- Encrypt and decrypt single files (`.pbx`) and folders (`.tar.pbx`) with filippo.io/age streaming encryption.
+- First-run onboarding and a keyboard-driven home menu, file picker and key map (Bubble Tea).
+- Four unlock modes: password, PIN, password+2FA and PIN+2FA.
+- Argon2id key derivation with HKDF, XChaCha20-Poly1305 key wrapping, a 32-byte device secret for PIN modes and RFC 6238 TOTP with replay protection.
+- Recovery key (age identity) shown once at init and via `pillarbox export-key`; output decrypts with the stock `age` binary.
+- CLI commands: init, lock, unlock, status, export-key, config, version, completion, with `--no-tui`, `--secret-stdin`, `--totp` and `--quiet` flags and exit codes 0-5.
+- Archive extraction rejects `..`, absolute paths and symlinks resolving outside the target.
+- `scripts/e2e.sh` end-to-end test running in CI on Ubuntu and macOS.
+- GoReleaser release publishing binaries for darwin and linux on amd64 and arm64.
