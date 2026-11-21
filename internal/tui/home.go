@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
 	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
@@ -498,7 +497,7 @@ func (m *Home) statusView() string {
 }
 
 // chromeLines is the fixed vertical cost of header + tabs + footer around the box.
-const chromeLines = 8 // title, tagline, blank, tabs, underline blank, blank-before-footer, footer, blank-after-tabs
+const chromeLines = 9 // title, tagline, blank, tabs, tab underline, blank, box gap, footer gap, footer
 
 func (m *Home) contentSize() (w, h int) {
 	w = m.width - 4 // box borders + padding
@@ -531,38 +530,47 @@ func (m *Home) View() string {
 		innerH = m.height - 5 // title + blanks + footer only
 	}
 	body := m.contentBody(innerH)
-	style := m.th.box.Width(innerW)
-	// Avoid clipping prompts/QR: let the box grow; fit() still caps the screen.
-	if m.screen == homePicker || m.screen == homeStatus || m.screen == homeHelp || m.screen == homeSettings {
-		style = style.Height(innerH)
-	}
-	b.WriteString(style.Render(body))
+	// Cap the body to the box before styling so the border is drawn around a
+	// known plain-text size. Do not set Height on the box: lipgloss pads with
+	// blank cells that then fight ansi.Wrap in fit().
+	body = clampLines(body, innerH)
+	b.WriteString(m.th.box.Width(innerW).Render(body))
 	b.WriteString("\n\n")
 	b.WriteString(m.th.dim.Render(footerKeys))
 	return fit(b.String(), m.width, m.height)
 }
 
+// renderTabs draws the tab labels and a second line of ─ under the active tab.
+// Underline is a separate row of characters, not SGR underline — that kept
+// fit() from tearing the active label apart.
 func (m *Home) renderTabs() string {
-	parts := make([]string, 0, len(homeTabs))
+	var labels strings.Builder
+	var under strings.Builder
 	for i, name := range homeTabs {
+		if i > 0 {
+			labels.WriteString("  ")
+			under.WriteString("  ")
+		}
 		if i == m.tab {
-			parts = append(parts, m.th.tabActive.Render(name))
+			labels.WriteString(m.th.tabActive.Render(name))
+			under.WriteString(m.th.accent.Render(strings.Repeat("─", len([]rune(name)))))
 		} else {
-			parts = append(parts, m.th.tab.Render(name))
+			labels.WriteString(m.th.tab.Render(name))
+			under.WriteString(strings.Repeat(" ", len([]rune(name))))
 		}
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, joinTabs(parts)...)
+	return labels.String() + "\n" + under.String()
 }
 
-func joinTabs(parts []string) []string {
-	out := make([]string, 0, len(parts)*2-1)
-	for i, p := range parts {
-		if i > 0 {
-			out = append(out, "  ")
-		}
-		out = append(out, p)
+func clampLines(s string, max int) string {
+	if max <= 0 {
+		return s
 	}
-	return out
+	lines := strings.Split(s, "\n")
+	if len(lines) > max {
+		lines = lines[:max]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Home) contentBody(innerH int) string {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-21
+
+### Fixed
+
+- Home TUI rendering: `fit()` no longer slices ANSI sequences (garbled tab labels like `4;38;2;…mpt`). Active tab underline is a row of `─` characters; content box no longer uses a fixed lipgloss Height that broke the border.
+
 ## [0.3.0] - 2026-11-21
 
 ### Changed
