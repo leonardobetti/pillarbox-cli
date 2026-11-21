@@ -8,10 +8,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The layout fits 80 by 24, PRD section 11.
+// Layout cell budget. minTerm* is the smallest window we render the full UI
+// for — about 800×800 CSS/device pixels at a typical monospace cell
+// (~10×20px). Below that, Home shows a resize hint instead of a broken frame.
 const (
-	maxWidth  = 78
-	maxHeight = 24
+	maxWidth      = 78
+	maxHeight     = 24
+	minTermWidth  = 80
+	minTermHeight = 40
 )
 
 // Magenta accent (ANSI 201). Avoid truecolor here: shorter sequences and

@@ -116,8 +116,8 @@ func NewHome(d *Deps) *Home {
 		th:      th,
 		screen:  homePicker,
 		tab:     tabEncrypt,
-		width:   maxWidth,
-		height:  maxHeight,
+		width:   0,
+		height:  0,
 		chooser: cl,
 	}
 	h.reloadSettings()
@@ -136,6 +136,15 @@ func (m *Home) reloadSettings() {
 }
 
 func (m *Home) Init() tea.Cmd { return nil }
+
+// tooSmall is true once the terminal has reported a size below the 800×800px
+// cell budget. Width/height 0 means "not yet known" and is not treated as small.
+func (m *Home) tooSmall() bool {
+	if m.width <= 0 || m.height <= 0 {
+		return false
+	}
+	return m.width < minTermWidth || m.height < minTermHeight
+}
 
 func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -162,7 +171,7 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			// On the 2FA screen Ctrl+C copies the URI instead of quitting.
-			if m.screen == home2FA {
+			if !m.tooSmall() && m.screen == home2FA {
 				up, cmd := m.twofa.Update(msg)
 				if p, ok := up.(*twofaPrompt); ok {
 					m.twofa = p
@@ -173,6 +182,9 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "q" && !m.typing() {
 			return m, tea.Quit
+		}
+		if m.tooSmall() {
+			return m, nil
 		}
 		// Tab / arrows switch the top menu unless a text field is focused
 		// or Settings is using arrows to toggle options.
@@ -500,18 +512,48 @@ func (m *Home) statusView() string {
 const chromeLines = 9 // title, tagline, blank, tabs, tab underline, blank, box gap, footer gap, footer
 
 func (m *Home) contentSize() (w, h int) {
-	w = m.width - 4 // box borders + padding
+	termW, termH := m.width, m.height
+	if termW <= 0 {
+		termW = minTermWidth
+	}
+	if termH <= 0 {
+		termH = minTermHeight
+	}
+	w = termW - 4 // box borders + padding
 	if w < 20 {
 		w = 20
 	}
-	h = m.height - chromeLines - 2 // box top/bottom borders
+	h = termH - chromeLines - 2 // box top/bottom borders
 	if h < 4 {
 		h = 4
 	}
 	return w, h
 }
 
+func (m *Home) resizeView() string {
+	var b strings.Builder
+	b.WriteString(m.th.title.Render("Pillarbox"))
+	b.WriteString("\n\n")
+	b.WriteString(m.th.dim.Render("Terminal too small for this UI."))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("Need at least %d×%d cells (~800×800px). Now %d×%d.",
+		minTermWidth, minTermHeight, m.width, m.height))
+	b.WriteString("\n\n")
+	b.WriteString(m.th.dim.Render("Resize the window, or press q to quit."))
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = minTermWidth
+	}
+	if h <= 0 {
+		h = minTermHeight
+	}
+	return fit(b.String(), w, h)
+}
+
 func (m *Home) View() string {
+	if m.tooSmall() {
+		return m.resizeView()
+	}
 	var b strings.Builder
 	b.WriteString(m.th.title.Render("Pillarbox"))
 	b.WriteString("\n")
@@ -537,7 +579,14 @@ func (m *Home) View() string {
 	b.WriteString(m.th.box.Width(innerW).Render(body))
 	b.WriteString("\n\n")
 	b.WriteString(m.th.dim.Render(footerKeys))
-	return fit(b.String(), m.width, m.height)
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = minTermWidth
+	}
+	if h <= 0 {
+		h = minTermHeight
+	}
+	return fit(b.String(), w, h)
 }
 
 // renderTabs draws the tab labels and a second line of ─ under the active tab.
