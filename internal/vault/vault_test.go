@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"filippo.io/age"
+
+	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
 )
 
 func newIdentity(t *testing.T) *age.X25519Identity {
@@ -79,7 +81,7 @@ func TestLockUnlockRoundTrip(t *testing.T) {
 	v := New()
 	id := newIdentity(t)
 
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -112,7 +114,7 @@ func TestUnlockWrongIdentity(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -144,7 +146,7 @@ func TestUnlockFlippedByte(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -167,7 +169,7 @@ func TestUnlockTruncated(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -187,7 +189,7 @@ func TestUnlockAppendedByte(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -207,7 +209,7 @@ func TestLockUnlockEmptyFile(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock empty: %v", err)
 	}
@@ -227,13 +229,13 @@ func TestLockRefusesExistingOutputWithoutForce(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	if _, err := v.Lock(src, id.Recipient().String(), LockOptions{}); err != nil {
+	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{}); err != nil {
 		t.Fatalf("first Lock: %v", err)
 	}
-	if _, err := v.Lock(src, id.Recipient().String(), LockOptions{}); err == nil {
+	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{}); err == nil {
 		t.Fatal("second Lock without Force succeeded, want error")
 	}
-	if _, err := v.Lock(src, id.Recipient().String(), LockOptions{Force: true}); err != nil {
+	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{Force: true}); err != nil {
 		t.Fatalf("Lock with Force: %v", err)
 	}
 }
@@ -245,7 +247,7 @@ func TestUnlockRefusesExistingOutputWithoutForce(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -274,7 +276,7 @@ func TestLockCustomOutput(t *testing.T) {
 	v := New()
 	id := newIdentity(t)
 	custom := filepath.Join(dir, "custom.enc")
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{Out: custom})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{Out: custom})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -290,7 +292,7 @@ func TestLockRemoveOriginal(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	if _, err := v.Lock(src, id.Recipient().String(), LockOptions{RemoveOriginal: true}); err != nil {
+	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{RemoveOriginal: true}); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
@@ -305,7 +307,7 @@ func TestUnlockDefaultNameStripsPbx(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -325,9 +327,10 @@ func TestUnlockDefaultNameStripsPbx(t *testing.T) {
 	}
 }
 
-// TestStockAgeBinaryDecrypts proves FR-12-style interop: a file locked by this
-// code decrypts with the stock age binary and the identity. Skipped when the
-// age binary is not on PATH.
+// TestStockAgeBinaryDecrypts proves FR-12-style interop: the age payload
+// inside a single-file .pbx decrypts with the stock age binary and the
+// identity after stripping the PBX1 header line. Skipped when the age binary
+// is not on PATH.
 func TestStockAgeBinaryDecrypts(t *testing.T) {
 	if _, err := exec.LookPath("age"); err != nil {
 		t.Skip("stock age binary not on PATH")
@@ -339,15 +342,24 @@ func TestStockAgeBinaryDecrypts(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
 	keyFile := filepath.Join(dir, "key.txt")
 	writeFile(t, keyFile, []byte(id.String()+"\n"))
+	// strip the PBX1 header line: the rest is a standard age file
+	payload := filepath.Join(dir, "payload.age")
+	cmd := exec.Command("tail", "-n", "+2", dst)
+	stripped, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("tail failed: %v", err)
+	}
+	writeFile(t, payload, stripped)
+
 	out := filepath.Join(dir, "interop.out")
-	cmd := exec.Command("age", "-d", "-i", keyFile, "-o", out, dst)
+	cmd = exec.Command("age", "-d", "-i", keyFile, "-o", out, payload)
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("stock age -d failed: %v\n%s", err, combined)
 	}
@@ -367,7 +379,7 @@ func TestUnlockFileOutputDirMissingIsNotIntegrity(t *testing.T) {
 
 	v := New()
 	id := newIdentity(t)
-	dst, err := v.Lock(src, id.Recipient().String(), LockOptions{})
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -392,7 +404,7 @@ func TestLockFolderUnsupported(t *testing.T) {
 	}
 	v := New()
 	id := newIdentity(t)
-	_, err := v.Lock(sub, id.Recipient().String(), LockOptions{})
+	_, err := v.Lock(sub, testKeystore(t, id), LockOptions{})
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Lock(dir): err = %v, want ErrUnsupported", err)
 	}
@@ -409,5 +421,147 @@ func TestUnlockTarPbxUnsupported(t *testing.T) {
 	_, err := v.Unlock(src, newIdentity(t), UnlockOptions{})
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Unlock(.tar.pbx): err = %v, want ErrUnsupported", err)
+	}
+}
+
+// testKeystore builds a minimal valid keystore for the given identity.
+func testKeystore(t *testing.T, id *age.X25519Identity) *keystore.Keystore {
+	t.Helper()
+	return &keystore.Keystore{
+		Version:         1,
+		Mode:            keystore.ModePassword,
+		Salt:            bytes.Repeat([]byte{1}, 16),
+		Recipient:       id.Recipient().String(),
+		WrappedIdentity: keystore.WrappedKey{Nonce: bytes.Repeat([]byte{2}, 24), Ciphertext: []byte("x")},
+	}
+}
+
+// TestSingleFileFormat checks that Lock produces one file with a PBX1 header
+// and that ReadKey recovers the key from it.
+func TestSingleFileFormat(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.txt")
+	writeFile(t, src, []byte("hello"))
+
+	v := New()
+	id := newIdentity(t)
+	ks := testKeystore(t, id)
+	dst, err := v.Lock(src, ks, LockOptions{})
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	if _, err := os.Stat(dst + ".key"); !os.IsNotExist(err) {
+		t.Fatal("sidecar .key file should not exist anymore")
+	}
+	head, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(head), "PBX1 ") {
+		t.Fatalf("no PBX1 header in %s", dst)
+	}
+	if !strings.Contains(string(head), "age-encryption.org/v1") {
+		t.Fatal("age payload missing after header")
+	}
+	got, err := v.ReadKey(dst)
+	if err != nil {
+		t.Fatalf("ReadKey: %v", err)
+	}
+	if got.Recipient != ks.Recipient {
+		t.Fatalf("ReadKey recipient = %q, want %q", got.Recipient, ks.Recipient)
+	}
+}
+
+// TestReadKeySidecarCompat checks that a v0.2.0 two-file .pbx still reads its
+// key from the .key sidecar.
+func TestReadKeySidecarCompat(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.txt")
+	writeFile(t, src, []byte("hello"))
+
+	v := New()
+	id := newIdentity(t)
+	ks := testKeystore(t, id)
+
+	// hand-build a v0.2.0 layout: plain age payload + sidecar
+	pbx := filepath.Join(dir, "a.txt.pbx")
+	writeFile(t, pbx, func() []byte {
+		var buf bytes.Buffer
+		w, _ := age.Encrypt(&buf, id.Recipient())
+		_, _ = w.Write([]byte("hello"))
+		_ = w.Close()
+		return buf.Bytes()
+	}())
+	if err := keystore.NewStore(pbx + ".key").Save(ks); err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.ReadKey(pbx)
+	if err != nil {
+		t.Fatalf("ReadKey sidecar: %v", err)
+	}
+	if got.Recipient != ks.Recipient {
+		t.Fatalf("sidecar recipient = %q, want %q", got.Recipient, ks.Recipient)
+	}
+	// and unlock of the old format still works
+	out := filepath.Join(dir, "out.txt")
+	if _, err := v.Unlock(pbx, id, UnlockOptions{Out: out}); err != nil {
+		t.Fatalf("Unlock sidecar format: %v", err)
+	}
+	if string(readFile(t, out)) != "hello" {
+		t.Fatal("sidecar round trip content mismatch")
+	}
+}
+
+// TestSaveKeyRewritesHeader checks that SaveKey updates the header (TOTP step)
+// and keeps the payload decryptable.
+func TestSaveKeyRewritesHeader(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.txt")
+	writeFile(t, src, []byte("hello"))
+
+	v := New()
+	id := newIdentity(t)
+	ks := testKeystore(t, id)
+	dst, err := v.Lock(src, ks, LockOptions{})
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	step := int64(42)
+	ks.LastTOTPStep = &step
+	if err := v.SaveKey(dst, ks); err != nil {
+		t.Fatalf("SaveKey: %v", err)
+	}
+	got, err := v.ReadKey(dst)
+	if err != nil {
+		t.Fatalf("ReadKey after SaveKey: %v", err)
+	}
+	if got.LastTOTPStep == nil || *got.LastTOTPStep != 42 {
+		t.Fatalf("LastTOTPStep = %v, want 42", got.LastTOTPStep)
+	}
+	out := filepath.Join(dir, "out.txt")
+	if _, err := v.Unlock(dst, id, UnlockOptions{Out: out}); err != nil {
+		t.Fatalf("Unlock after SaveKey: %v", err)
+	}
+	if string(readFile(t, out)) != "hello" {
+		t.Fatal("payload corrupted by SaveKey")
+	}
+}
+
+// TestReadKeyTamperedHeader checks that a corrupted PBX1 header is rejected.
+func TestReadKeyTamperedHeader(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.txt")
+	writeFile(t, src, []byte("hello"))
+	v := New()
+	id := newIdentity(t)
+	dst, err := v.Lock(src, testKeystore(t, id), LockOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := readFile(t, dst)
+	b[10] ^= 0x01 // corrupt inside the base64 header
+	writeFile(t, dst, b)
+	if _, err := v.ReadKey(dst); err == nil {
+		t.Fatal("ReadKey accepted a tampered header")
 	}
 }

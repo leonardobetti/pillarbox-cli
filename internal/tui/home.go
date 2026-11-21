@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
 	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
@@ -19,8 +20,7 @@ import (
 type homeScreen int
 
 const (
-	homeMenu homeScreen = iota
-	homePicker
+	homePicker homeScreen = iota
 	homeChooser
 	homeSecret
 	home2FA
@@ -30,11 +30,21 @@ const (
 	homeResult
 )
 
-type menuItem string
+const (
+	tabEncrypt = iota
+	tabDecrypt
+	tabStatus
+	tabSettings
+	tabHelp
+)
 
-func (m menuItem) FilterValue() string { return string(m) }
-func (m menuItem) Title() string       { return string(m) }
-func (m menuItem) Description() string { return "" }
+var homeTabs = []string{"Encrypt", "Decrypt", "Status", "Settings", "Help"}
+
+const tagline = "Pillarbox encrypts and decrypts files from the terminal."
+
+const footerKeys = "Tab, ← or → to navigate  Enter to select  Q to quit  Backspace to change"
+
+const helpText = "Tab / ← / → switch tabs • ↑/↓ move in the box • enter select • backspace parent or back • a apply (settings) • q quit • ctrl+c abort"
 
 type promptDoneMsg struct {
 	action string
@@ -49,16 +59,22 @@ type twofaDoneMsg struct {
 
 type promptCancelledMsg struct{}
 
-// Home is the home menu: Encrypt, Decrypt, Status, Settings, Help. Every file
-// is encrypted with its own key; the key type comes from Settings and is
-// asked for when unset.
+type modeItem string
+
+func (m modeItem) FilterValue() string { return string(m) }
+func (m modeItem) Title() string       { return string(m) }
+func (m modeItem) Description() string { return "" }
+
+// Home is the home shell: horizontal tabs, a bordered content box, and a
+// keybinding footer. Every file is encrypted with its own key; the key type
+// comes from Settings and is asked for when unset.
 type Home struct {
 	deps   *Deps
 	th     theme
 	screen homeScreen
+	tab    int
 
 	width, height int
-	menu          list.Model
 
 	settings    *keystore.Settings
 	settingsErr string
@@ -80,23 +96,8 @@ type Home struct {
 	resultIsErr bool
 }
 
-const helpText = "↑/↓ or tab navigate • backspace toggle switch • a apply • enter select • esc back • q quit • ctrl+c abort"
-
 func NewHome(d *Deps) *Home {
 	th := newTheme(os.Stdout)
-	items := []list.Item{
-		menuItem("Encrypt"),
-		menuItem("Decrypt"),
-		menuItem("Status"),
-		menuItem("Settings"),
-		menuItem("Help"),
-	}
-	l := list.New(items, list.NewDefaultDelegate(), maxWidth, 8)
-	l.Title = "Pillarbox"
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetShowPagination(false)
-	l.SetFilteringEnabled(false)
 
 	modes := []list.Item{
 		modeItem(keystore.ModePassword),
@@ -111,8 +112,17 @@ func NewHome(d *Deps) *Home {
 	cl.SetShowPagination(false)
 	cl.SetFilteringEnabled(false)
 
-	h := &Home{deps: d, th: th, screen: homeMenu, width: maxWidth, height: maxHeight, menu: l, chooser: cl}
+	h := &Home{
+		deps:    d,
+		th:      th,
+		screen:  homePicker,
+		tab:     tabEncrypt,
+		width:   maxWidth,
+		height:  maxHeight,
+		chooser: cl,
+	}
 	h.reloadSettings()
+	h.activateTab()
 	return h
 }
 
@@ -132,10 +142,10 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.menu.SetSize(msg.Width, msg.Height-8)
-		m.chooser.SetSize(msg.Width, msg.Height-10)
+		innerW, innerH := m.contentSize()
+		m.chooser.SetSize(innerW, max(innerH-2, 4))
 		if m.picker != nil {
-			m.picker.width, m.picker.height = msg.Width, msg.Height
+			m.picker.width, m.picker.height = innerW, innerH
 		}
 		return m, nil
 	case pickedMsg:
@@ -148,7 +158,7 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.run2FADone(msg)
 		return m, nil
 	case promptCancelledMsg, pickerCancelledMsg:
-		m.screen = homeMenu
+		m.returnToTab()
 		return m, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -162,18 +172,23 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if msg.Type == tea.KeyEsc {
-			if m.screen == homeMenu {
-				return m, tea.Quit
-			}
-			m.screen = homeMenu
-			return m, nil
+		if msg.String() == "q" && !m.typing() {
+			return m, tea.Quit
 		}
-		if m.screen == homeMenu {
-			if msg.String() == "q" {
-				return m, tea.Quit
+		// Tab / arrows switch the top menu unless a text field is focused
+		// or Settings is using arrows to toggle options.
+		if m.canSwitchTab(msg) {
+			return m.switchTab(msg)
+		}
+		if msg.Type == tea.KeyEsc {
+			// Top-level tabs stay put; Q quits. Nested screens return to the tab.
+			switch m.screen {
+			case homePicker, homeStatus, homeHelp, homeSettings:
+				return m, nil
+			default:
+				m.returnToTab()
+				return m, nil
 			}
-			return m.updateMenu(msg)
 		}
 		switch m.screen {
 		case homePicker:
@@ -188,6 +203,11 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Type == tea.KeyEnter {
 				if it, ok := m.chooser.SelectedItem().(modeItem); ok {
 					m.pendingMode = keystore.Mode(it)
+					// Persist the choice so Settings keeps it between sessions.
+					m.settings.KeyType = m.pendingMode
+					if err := m.deps.Settings.Save(m.settings); err != nil {
+						m.settingsErr = "cannot write settings"
+					}
 					m.startSecret(m.pendingMode, "encrypt")
 				}
 			}
@@ -207,54 +227,83 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case homeSettings:
 			return m.updateSettings(msg)
 		case homeStatus, homeHelp, homeResult:
-			if msg.String() == "q" {
-				return m, tea.Quit
-			}
-			m.screen = homeMenu
+			m.returnToTab()
 			return m, nil
 		}
 	}
 	return m, nil
 }
 
-func (m *Home) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	if msg.Type == tea.KeyTab || msg.Type == tea.KeyShiftTab {
-		n := len(m.menu.Items())
-		if n > 0 {
-			i := m.menu.Index()
-			if msg.Type == tea.KeyTab {
-				m.menu.Select((i + 1) % n)
-			} else {
-				m.menu.Select((i - 1 + n) % n)
-			}
+func (m *Home) typing() bool {
+	if m.screen == homeSecret || m.screen == home2FA {
+		return true
+	}
+	return m.screen == homePicker && m.picker != nil && m.picker.filtering
+}
+
+func (m *Home) canSwitchTab(msg tea.KeyMsg) bool {
+	if m.typing() {
+		return false
+	}
+	switch msg.Type {
+	case tea.KeyTab, tea.KeyShiftTab:
+		// In Settings, Tab moves between options; use ←/→ for tabs there.
+		return m.screen != homeSettings
+	case tea.KeyLeft, tea.KeyRight:
+		// Settings uses ←/→ to toggle the selected option.
+		return m.screen != homeSettings && m.screen != homeChooser
+	}
+	return false
+}
+
+func (m *Home) switchTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	n := len(homeTabs)
+	switch msg.Type {
+	case tea.KeyTab, tea.KeyRight:
+		m.tab = (m.tab + 1) % n
+	case tea.KeyShiftTab, tea.KeyLeft:
+		m.tab = (m.tab - 1 + n) % n
+	}
+	m.activateTab()
+	return m, nil
+}
+
+func (m *Home) activateTab() {
+	m.pendingSecret = ""
+	m.pendingPath = ""
+	m.pendingKS = nil
+	switch m.tab {
+	case tabEncrypt:
+		// With "require authentication to encrypt" on, the secret is asked
+		// before the file picker and reused for the file's key.
+		if m.settings.AuthEncrypt && m.settings.KeyType.Valid() {
+			m.startSecret(m.settings.KeyType, "gate")
+			break
 		}
-		return m, nil
-	}
-	m.menu, cmd = m.menu.Update(msg)
-	if msg.Type != tea.KeyEnter {
-		return m, cmd
-	}
-	it, ok := m.menu.SelectedItem().(menuItem)
-	if !ok {
-		return m, cmd
-	}
-	switch it {
-	case "Encrypt":
-		m.openPicker("encrypt", "Encrypt — select a file")
-	case "Decrypt":
-		m.openPicker("decrypt", "Decrypt — select a .pbx file")
-	case "Status":
+		m.openPicker("encrypt", "Select a file to encrypt")
+	case tabDecrypt:
+		m.openPicker("decrypt", "Select a .pbx file to decrypt")
+	case tabStatus:
 		m.statusText = m.statusView()
 		m.screen = homeStatus
-	case "Settings":
+		m.picker = nil
+	case tabSettings:
 		m.reloadSettings()
 		m.setCursor = 0
 		m.screen = homeSettings
-	case "Help":
+		m.picker = nil
+	case tabHelp:
 		m.screen = homeHelp
+		m.picker = nil
 	}
-	return m, cmd
+}
+
+func (m *Home) returnToTab() {
+	// Re-enter the active tab's default content. Clears pending encrypt state.
+	m.pendingSecret = ""
+	m.pendingPath = ""
+	m.pendingKS = nil
+	m.activateTab()
 }
 
 // updateSettings is a stable option list: one keypress, one action, no loop.
@@ -274,7 +323,7 @@ func (m *Home) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setResult("", err)
 			return m, nil
 		}
-		m.screen = homeMenu
+		m.returnToTab()
 	case "q":
 		return m, tea.Quit
 	}
@@ -292,12 +341,14 @@ func (m *Home) toggleSetting(i int) {
 		}
 		m.settings.KeyType = modes[(cur+1)%len(modes)]
 	} else {
-		m.settings.GateEncrypt = !m.settings.GateEncrypt
+		m.settings.AuthEncrypt = !m.settings.AuthEncrypt
 	}
 }
 
 func (m *Home) openPicker(action, title string) {
 	m.picker = NewPicker(title, action, m.deps.StartDir, m.th)
+	innerW, innerH := m.contentSize()
+	m.picker.width, m.picker.height = innerW, innerH
 	m.screen = homePicker
 }
 
@@ -305,6 +356,11 @@ func (m *Home) runPicked(msg pickedMsg) {
 	switch msg.action {
 	case "encrypt":
 		m.pendingPath = msg.path
+		if m.pendingSecret != "" {
+			// Secret already collected at the auth gate.
+			m.startEncryptWithSecret(m.pendingMode, m.pendingSecret)
+			return
+		}
 		if !m.settings.KeyType.Valid() {
 			m.screen = homeChooser
 			return
@@ -315,9 +371,9 @@ func (m *Home) runPicked(msg pickedMsg) {
 			m.setResult("", errors.New("select a .pbx file"))
 			return
 		}
-		ks, err := keystore.NewStore(msg.path + ".key").Load()
+		ks, err := m.deps.Vault.ReadKey(msg.path)
 		if err != nil {
-			m.setResult("", errors.New("no key for this file or key file invalid"))
+			m.setResult("", errors.New("no key for this file or key invalid"))
 			return
 		}
 		m.pendingPath = msg.path
@@ -333,19 +389,15 @@ func (m *Home) startSecret(mode keystore.Mode, action string) {
 }
 
 func (m *Home) runPromptDone(msg promptDoneMsg) {
+	if msg.action == "gate" {
+		// Auth gate passed: keep the secret and go pick the file.
+		m.pendingMode = msg.mode
+		m.pendingSecret = msg.secret
+		m.openPicker("encrypt", "Select a file to encrypt")
+		return
+	}
 	if msg.action == "encrypt" {
-		if msg.mode.Has2FA() {
-			seed, uri, err := m.deps.TOTP.GenerateSeed()
-			if err != nil {
-				m.setResult("", errors.New("cannot generate 2FA seed"))
-				return
-			}
-			m.twofa = newTwofaPrompt(m.deps, seed, uri)
-			m.pendingSecret = msg.secret
-			m.screen = home2FA
-			return
-		}
-		m.doEncrypt(msg.secret, nil)
+		m.startEncryptWithSecret(msg.mode, msg.secret)
 		return
 	}
 	// decrypt
@@ -357,19 +409,40 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 	}
 	if m.pendingKS.Mode.Has2FA() {
 		m.pendingKS.LastTOTPStep = &step
-		_ = keystore.NewStore(m.pendingPath + ".key").Save(m.pendingKS)
+		_ = m.deps.Vault.SaveKey(m.pendingPath, m.pendingKS)
 	}
 	identity, err := age.ParseX25519Identity(string(id))
 	if err != nil {
 		m.setResult("", err)
 		return
 	}
-	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{})
+	// The TUI overwrites the original when it still exists next to the .pbx.
+	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{Force: true})
 	m.setResult(dst, err)
 }
 
+// startEncryptWithSecret runs the encrypt flow with an already collected
+// secret: the 2FA QR screen for 2FA modes, otherwise the lock right away.
+func (m *Home) startEncryptWithSecret(mode keystore.Mode, secret string) {
+	m.pendingMode = mode
+	m.pendingSecret = secret
+	if mode.Has2FA() {
+		seed, uri, err := m.deps.TOTP.GenerateSeed()
+		if err != nil {
+			m.setResult("", errors.New("cannot generate 2FA seed"))
+			return
+		}
+		m.twofa = newTwofaPrompt(m.deps, seed, uri)
+		m.screen = home2FA
+		return
+	}
+	m.doEncrypt(secret, nil)
+}
+
 func (m *Home) run2FADone(msg twofaDoneMsg) {
-	m.doEncrypt(m.pendingSecret, msg.seed)
+	secret := m.pendingSecret
+	m.pendingSecret = ""
+	m.doEncrypt(secret, msg.seed)
 }
 
 func (m *Home) doEncrypt(secret string, seed []byte) {
@@ -395,17 +468,12 @@ func (m *Home) doEncrypt(secret string, seed []byte) {
 		m.setResult("", err)
 		return
 	}
-	dst := m.pendingPath + ".pbx"
-	locked, err := m.deps.Vault.Lock(m.pendingPath, ks.Recipient, vault.LockOptions{})
+	locked, err := m.deps.Vault.Lock(m.pendingPath, ks, vault.LockOptions{})
 	if err != nil {
 		m.setResult("", err)
 		return
 	}
-	if err := keystore.NewStore(dst + ".key").Save(ks); err != nil {
-		_ = os.Remove(locked)
-		m.setResult("", errors.New("cannot write file key"))
-		return
-	}
+	m.pendingSecret = ""
 	m.setResult(locked+"\nrecovery key (shown once): "+identity.String(), nil)
 }
 
@@ -425,61 +493,125 @@ func (m *Home) statusView() string {
 	if keyType == "" {
 		keyType = "(not set)"
 	}
-	return fmt.Sprintf("key type: %s\ngate-encrypt: %t\nsettings: %s\nversion: %s",
-		keyType, m.settings.GateEncrypt, m.deps.Settings.Path(), m.deps.Version)
+	return fmt.Sprintf("key type: %s\nauth-encrypt: %t\nsettings: %s\nversion: %s",
+		keyType, m.settings.AuthEncrypt, m.deps.Settings.Path(), m.deps.Version)
+}
+
+// chromeLines is the fixed vertical cost of header + tabs + footer around the box.
+const chromeLines = 8 // title, tagline, blank, tabs, underline blank, blank-before-footer, footer, blank-after-tabs
+
+func (m *Home) contentSize() (w, h int) {
+	w = m.width - 4 // box borders + padding
+	if w < 20 {
+		w = 20
+	}
+	h = m.height - chromeLines - 2 // box top/bottom borders
+	if h < 4 {
+		h = 4
+	}
+	return w, h
 }
 
 func (m *Home) View() string {
 	var b strings.Builder
+	b.WriteString(m.th.title.Render("Pillarbox"))
+	b.WriteString("\n")
+	// Dense screens (2FA QR) drop the tagline so the code entry stays visible.
+	if m.screen != home2FA {
+		b.WriteString(m.th.dim.Render(tagline))
+		b.WriteString("\n\n")
+		b.WriteString(m.renderTabs())
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("\n")
+	}
+
+	innerW, innerH := m.contentSize()
+	if m.screen == home2FA {
+		innerH = m.height - 5 // title + blanks + footer only
+	}
+	body := m.contentBody(innerH)
+	style := m.th.box.Width(innerW)
+	// Avoid clipping prompts/QR: let the box grow; fit() still caps the screen.
+	if m.screen == homePicker || m.screen == homeStatus || m.screen == homeHelp || m.screen == homeSettings {
+		style = style.Height(innerH)
+	}
+	b.WriteString(style.Render(body))
+	b.WriteString("\n\n")
+	b.WriteString(m.th.dim.Render(footerKeys))
+	return fit(b.String(), m.width, m.height)
+}
+
+func (m *Home) renderTabs() string {
+	parts := make([]string, 0, len(homeTabs))
+	for i, name := range homeTabs {
+		if i == m.tab {
+			parts = append(parts, m.th.tabActive.Render(name))
+		} else {
+			parts = append(parts, m.th.tab.Render(name))
+		}
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, joinTabs(parts)...)
+}
+
+func joinTabs(parts []string) []string {
+	out := make([]string, 0, len(parts)*2-1)
+	for i, p := range parts {
+		if i > 0 {
+			out = append(out, "  ")
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func (m *Home) contentBody(innerH int) string {
 	switch m.screen {
-	case homeMenu:
-		b.WriteString(m.menu.View())
-		b.WriteString("\n" + m.th.dim.Render("↑/↓ or tab navigate • enter select • esc back • q quit • ctrl+c abort"))
 	case homePicker:
-		return m.picker.View()
+		if m.picker == nil {
+			return ""
+		}
+		return m.picker.ContentView(innerH)
 	case homeChooser:
-		b.WriteString(m.th.title.Render("Key type not set in Settings"))
-		b.WriteString("\n\nChoose the key type for this file:\n\n")
+		var b strings.Builder
+		b.WriteString("Key type not set in Settings\n\n")
 		b.WriteString(m.chooser.View())
-		b.WriteString("\n" + m.th.dim.Render("↑/↓ or tab navigate • enter select • esc back • q quit"))
+		return b.String()
 	case homeSecret:
-		return m.prompt.View()
+		return m.prompt.ContentView()
 	case home2FA:
-		return m.twofa.View()
+		return m.twofa.ContentView()
 	case homeSettings:
 		keyType := string(m.settings.KeyType)
 		if keyType == "" {
 			keyType = "(not set)"
 		}
-		gate := "no"
-		if m.settings.GateEncrypt {
-			gate = "yes"
+		auth := "no"
+		if m.settings.AuthEncrypt {
+			auth = "yes"
 		}
-		b.WriteString(m.th.title.Render("Settings"))
-		b.WriteString("\n\n")
-		for i, line := range []string{"Key type: " + keyType, "Gate encrypt: " + gate} {
+		var b strings.Builder
+		b.WriteString("Settings\n\n")
+		for i, line := range []string{"Key type: " + keyType, "Require authentication to encrypt: " + auth} {
 			marker := "  "
 			if i == m.setCursor {
 				marker = "> "
 			}
 			b.WriteString(marker + line + "\n")
 		}
-		b.WriteString("\n" + m.th.dim.Render("↑/↓/tab/backspace move • ←/→ toggle • a apply • esc back • q quit • ctrl+c abort"))
+		b.WriteString("\n" + m.th.dim.Render("↑/↓/tab move • ←/→ toggle • a apply • backspace cycle"))
+		return b.String()
 	case homeStatus:
-		b.WriteString(m.th.title.Render("Status") + "\n\n" + m.statusText + "\n")
-		b.WriteString("\n" + m.th.dim.Render("any key back • q quit"))
+		return "Status\n\n" + m.statusText
 	case homeHelp:
-		b.WriteString(m.th.title.Render("Keys") + "\n\n" + helpText + "\n")
-		b.WriteString("\n" + m.th.dim.Render("any key back • q quit"))
+		return "Help\n\n" + helpText
 	case homeResult:
 		if m.resultIsErr {
-			b.WriteString(m.th.errS.Render(m.result) + "\n")
-		} else {
-			b.WriteString(m.th.ok.Render(m.result) + "\n")
+			return m.th.errS.Render(m.result)
 		}
-		b.WriteString("\n" + m.th.dim.Render("any key back • q quit"))
+		return m.th.ok.Render(m.result)
 	}
-	return fit(b.String(), m.width, m.height)
+	return ""
 }
 
 // secretPrompt collects the secret for one operation, with the mode's rules
@@ -552,10 +684,9 @@ func (p *secretPrompt) updateInputs(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, cmd
 }
 
-func (p *secretPrompt) View() string {
+func (p *secretPrompt) ContentView() string {
 	var b strings.Builder
-	b.WriteString(p.th.title.Render("Secret (" + string(p.mode) + ")"))
-	b.WriteString("\n\n")
+	b.WriteString("Secret (" + string(p.mode) + ")\n\n")
 	for _, rule := range auth.SecretRules(p.mode) {
 		b.WriteString(p.th.dim.Render(rule) + "\n")
 	}
@@ -566,8 +697,11 @@ func (p *secretPrompt) View() string {
 	if p.errMsg != "" {
 		b.WriteString("\n" + p.th.errS.Render(p.errMsg) + "\n")
 	}
-	b.WriteString("\n" + p.th.dim.Render("tab next field • enter continue • esc back • ctrl+c abort"))
-	return fit(b.String(), maxWidth, maxHeight)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (p *secretPrompt) View() string {
+	return fit(p.ContentView()+"\n\n"+p.th.dim.Render("tab next field • enter continue • esc back • ctrl+c abort"), maxWidth, maxHeight)
 }
 
 // twofaPrompt shows the QR code of the per-file TOTP seed and asks for one
@@ -620,19 +754,36 @@ func (p *twofaPrompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, cmd
 }
 
-func (p *twofaPrompt) View() string {
+func (p *twofaPrompt) ContentView() string {
+	// Side-by-side QR + code entry so the input survives the 24-line budget.
 	var b strings.Builder
-	b.WriteString(p.th.title.Render("Set up 2FA for this file"))
-	b.WriteString("\n\nScan with your authenticator app, or ctrl+c to copy the URI:\n")
-	b.WriteString(p.qr + "\n")
-	b.WriteString(p.th.dim.Render(p.uri) + "\n\n")
-	b.WriteString("Enter one valid code: " + p.code.View() + "\n")
+	b.WriteString("Set up 2FA for this file\n")
+	qrLines := strings.Split(strings.TrimRight(p.qr, "\n"), "\n")
+	side := []string{
+		"Scan the QR, or ctrl+c copies the URI.",
+		"",
+		"Enter the 6-digit code:",
+		p.code.View(),
+	}
 	if p.copied != "" {
-		b.WriteString(p.th.ok.Render(p.copied) + "\n")
+		side = append(side, p.th.ok.Render(p.copied))
 	}
 	if p.errMsg != "" {
-		b.WriteString("\n" + p.th.errS.Render(p.errMsg) + "\n")
+		side = append(side, p.th.errS.Render(p.errMsg))
 	}
-	b.WriteString("\n" + p.th.dim.Render("enter continue • esc back • ctrl+c copy 2fa uri"))
-	return fit(b.String(), maxWidth, maxHeight)
+	for i, ql := range qrLines {
+		line := ql
+		if i < len(side) {
+			line += "  " + side[i]
+		}
+		b.WriteString(line + "\n")
+	}
+	for i := len(qrLines); i < len(side); i++ {
+		b.WriteString(side[i] + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (p *twofaPrompt) View() string {
+	return fit(p.ContentView()+"\n\n"+p.th.dim.Render("enter continue • esc back • ctrl+c copy 2fa uri"), maxWidth, maxHeight)
 }

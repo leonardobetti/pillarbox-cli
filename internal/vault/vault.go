@@ -4,6 +4,8 @@ import (
 	"errors"
 
 	"filippo.io/age"
+
+	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
 )
 
 // ErrIntegrity marks a failed authenticity check on a .pbx file or an unsafe
@@ -46,13 +48,20 @@ type UnlockOptions struct {
 // 7.3 and 7.4: age streaming, temp file + fsync + rename with mode 0600.
 // Vault owns the output files; no other package writes them.
 type Vault interface {
-	// Lock encrypts src, a single file, under recipient (the keystore
-	// recipient string, parsed here so keystore never imports age). Folders
-	// return ErrUnsupported. A failure leaves no partial output. Returns the
-	// output path.
-	Lock(src string, recipient string, opts LockOptions) (dst string, err error)
-	// Unlock decrypts src with identity. Existing paths are not overwritten
-	// without Force, and any tampering returns ErrIntegrity with no partial
-	// output left behind.
+	// Lock encrypts src, a single file, into one self-contained .pbx: a PBX1
+	// header line carrying the file's key (the serialized keystore), followed
+	// by the age stream to the key's recipient. Folders return
+	// ErrUnsupported. A failure leaves no partial output. Returns the output
+	// path.
+	Lock(src string, ks *keystore.Keystore, opts LockOptions) (dst string, err error)
+	// Unlock decrypts src with identity, skipping the PBX1 header when
+	// present. Existing paths are not overwritten without Force, and any
+	// tampering returns ErrIntegrity with no partial output left behind.
 	Unlock(src string, identity age.Identity, opts UnlockOptions) (dst string, err error)
+	// ReadKey returns the file's key from a .pbx: the PBX1 header, or, for
+	// files written by v0.2.0, the <file>.pbx.key sidecar.
+	ReadKey(src string) (*keystore.Keystore, error)
+	// SaveKey rewrites the PBX1 header of src with ks, keeping the encrypted
+	// payload byte for byte. Used to persist the TOTP step after unlock.
+	SaveKey(src string, ks *keystore.Keystore) error
 }

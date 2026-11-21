@@ -13,6 +13,9 @@ const (
 	maxHeight = 24
 )
 
+// Magenta accent from the UI proposal (active tab, underline, content border).
+const accentColor = lipgloss.Color("#ff00ff")
+
 // newRenderer is a var so tests can observe color handling. termenv honours
 // NO_COLOR when the renderer is built, so styles degrade to plain text.
 var newRenderer = func(w io.Writer) *lipgloss.Renderer {
@@ -20,19 +23,30 @@ var newRenderer = func(w io.Writer) *lipgloss.Renderer {
 }
 
 type theme struct {
-	title lipgloss.Style
-	dim   lipgloss.Style
-	errS  lipgloss.Style
-	ok    lipgloss.Style
+	title     lipgloss.Style
+	dim       lipgloss.Style
+	errS      lipgloss.Style
+	ok        lipgloss.Style
+	tab       lipgloss.Style
+	tabActive lipgloss.Style
+	box       lipgloss.Style
+	cursor    lipgloss.Style
 }
 
 func newTheme(w io.Writer) theme {
 	r := newRenderer(w)
 	return theme{
-		title: r.NewStyle().Bold(true).Foreground(lipgloss.Color("12")),
-		dim:   r.NewStyle().Foreground(lipgloss.Color("8")),
-		errS:  r.NewStyle().Foreground(lipgloss.Color("9")),
-		ok:    r.NewStyle().Foreground(lipgloss.Color("10")),
+		title:     r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
+		dim:       r.NewStyle().Foreground(lipgloss.Color("8")),
+		errS:      r.NewStyle().Foreground(lipgloss.Color("9")),
+		ok:        r.NewStyle().Foreground(lipgloss.Color("10")),
+		tab:       r.NewStyle().Foreground(lipgloss.Color("15")),
+		tabActive: r.NewStyle().Foreground(accentColor).Bold(true).Underline(true),
+		box: r.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(accentColor).
+			Padding(0, 1),
+		cursor: r.NewStyle().Foreground(lipgloss.Color("15")),
 	}
 }
 

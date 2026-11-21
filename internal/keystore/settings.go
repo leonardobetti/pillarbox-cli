@@ -9,10 +9,11 @@ import (
 // Settings are the user preferences persisted at
 // <config>/pillarbox/settings.json, mode 0600. KeyType is the key type used
 // for new files; empty means not configured yet, and the encrypt flow asks.
-// Unlike the per-file keystores, settings hold no secret material.
+// AuthEncrypt requires the secret before the encrypt file picker; it defaults
+// to false. Unlike the per-file keystores, settings hold no secret material.
 type Settings struct {
 	KeyType     Mode `json:"key_type"`
-	GateEncrypt bool `json:"gate_encrypt"`
+	AuthEncrypt bool `json:"auth_encrypt"`
 }
 
 // SettingsStore owns the settings file. Saves are atomic: temp file in the

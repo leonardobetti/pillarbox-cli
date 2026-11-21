@@ -62,6 +62,19 @@ func (s fileStore) Load() (*Keystore, error) {
 	return &ks, nil
 }
 
+// Parse unmarshals and validates a serialized Keystore, e.g. the PBX1 header
+// embedded in a single-file .pbx.
+func Parse(data []byte) (*Keystore, error) {
+	var ks Keystore
+	if err := json.Unmarshal(data, &ks); err != nil {
+		return nil, fmt.Errorf("%w: malformed key", ErrInvalid)
+	}
+	if err := ks.validate(); err != nil {
+		return nil, err
+	}
+	return &ks, nil
+}
+
 // validate checks the schema of section 7.2. It must not echo secret fields.
 func (ks *Keystore) validate() error {
 	if ks.Version != 1 {

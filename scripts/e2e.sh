@@ -138,8 +138,8 @@ run_mode() {
 
   say "mode $MODE: tampered file exits 4"
   cp "$run/data/file.txt.pbx" "$run/data/tampered.pbx"
-  cp "$run/data/file.txt.pbx.key" "$run/data/tampered.pbx.key"
-  local f="$run/data/tampered.pbx" off=100 byte new
+  local f="$run/data/tampered.pbx" off byte new
+  off=$(( $(wc -c < "$f") - 20 ))  # flip a byte in the age payload, past the PBX1 header
   byte="$(od -An -tu1 -j "$off" -N 1 "$f" | tr -d ' ')"
   new=$(( (byte + 1) % 256 ))
   printf "$(printf '\\%03o' "$new")" | dd of="$f" bs=1 seek="$off" conv=notrunc 2>/dev/null
