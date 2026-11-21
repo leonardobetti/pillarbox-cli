@@ -66,7 +66,7 @@ type Home struct {
 	resultIsErr bool
 }
 
-const helpText = "↑/↓ or k/j move • ←/→ or h/l parent/enter folder • enter select • esc back • / filter • ? help • q quit • ctrl+c abort"
+const helpText = "↑/↓ or k/j move • tab/shift+tab next/previous • ←/→ or h/l parent/enter folder • enter select • esc back • / filter • ? help • q quit • ctrl+c abort"
 
 func NewHome(d *Deps) *Home {
 	th := newTheme(os.Stdout)
@@ -181,6 +181,20 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Home) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	// Tab and Shift+Tab cycle the menu selection, PRD 8.4, so the menu is
+	// reachable with arrows or tab. The list keeps handling up/down itself.
+	if msg.Type == tea.KeyTab || msg.Type == tea.KeyShiftTab {
+		n := len(m.menu.Items())
+		if n > 0 {
+			i := m.menu.Index()
+			if msg.Type == tea.KeyTab {
+				m.menu.Select((i + 1) % n)
+			} else {
+				m.menu.Select((i - 1 + n) % n)
+			}
+		}
+		return m, nil
+	}
 	m.menu, cmd = m.menu.Update(msg)
 	if msg.Type != tea.KeyEnter {
 		return m, cmd

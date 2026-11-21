@@ -289,3 +289,30 @@ func TestHomeMenuAndLockViaPicker(t *testing.T) {
 		t.Fatalf("lock via picker did not produce a.txt.pbx: %v", err)
 	}
 }
+
+func TestHomeMenuTabNavigation(t *testing.T) {
+	deps := testDeps(t)
+	setupKeystore(t, deps, keystore.ModePassword)
+	if err := os.WriteFile(filepath.Join(deps.StartDir, "a.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Encrypt", "Decrypt", "Status", "Settings", "Help")
+
+	// Tab moves the selection to Decrypt; Enter opens the secret prompt.
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Secret")
+
+	// Shift+Tab moves back to Encrypt; Enter opens the file picker.
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "a.txt")
+
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+}
