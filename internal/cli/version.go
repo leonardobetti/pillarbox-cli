@@ -7,7 +7,7 @@ import (
 )
 
 // Version is the pillarbox version. The Makefile overrides it with ldflags.
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{

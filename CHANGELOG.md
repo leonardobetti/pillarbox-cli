@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Added
 
 - The secret screen and interactive prompts now state the secret rules for the chosen mode, with the security reason for each rule, before any input is required.
