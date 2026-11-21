@@ -18,7 +18,8 @@ type Deps struct {
 	DevStore auth.DeviceSecretStore
 	Vault    vault.Vault
 	Version  string
-	StartDir string // picker start directory, default "."
+	StartDir string             // picker start directory, default "."
+	CopyText func(string) error // clipboard write, e.g. atotto/clipboard
 }
 
 // RunOnboarding runs the first-run onboarding flow, PRD 8.1, and returns the

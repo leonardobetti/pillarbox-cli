@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/mdp/qrterminal/v3"
+	"rsc.io/qr"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
 	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
@@ -52,6 +55,8 @@ type Onboarding struct {
 	codeInput textinput.Model
 	seed      []byte
 	uri       string
+	qr        string // rendered QR code of the URI, terminal half-blocks
+	copied    string // clipboard status line on the 2FA screen
 
 	gateForm *huh.Form
 	gateVal  bool
@@ -117,6 +122,13 @@ func (m *Onboarding) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			// On the 2FA screen Ctrl+C copies the URI to the clipboard
+			// instead of aborting, so the QR payload can be pasted into an
+			// authenticator app that cannot scan.
+			if m.screen == screen2FA {
+				m.copied = copyToClipboard(m.deps, m.uri)
+				return m, nil
+			}
 			return m, tea.Quit
 		case tea.KeyEsc:
 			if m.screen == screenWelcome {
@@ -194,6 +206,8 @@ func (m *Onboarding) updateSecret(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.seed, m.uri = seed, uri
+			m.qr = renderQR(uri)
+			m.copied = ""
 			m.screen = screen2FA
 			return m, m.codeInput.Focus()
 		}
@@ -326,9 +340,13 @@ func (m *Onboarding) View() string {
 		b.WriteString("Confirm: " + m.confirm.View() + "\n")
 	case screen2FA:
 		b.WriteString(m.th.title.Render("Set up 2FA"))
-		b.WriteString("\n\nAdd this URI to your authenticator app:\n")
+		b.WriteString("\n\nScan with your authenticator app, or ctrl+c to copy the URI:\n")
+		b.WriteString(m.qr + "\n")
 		b.WriteString(m.th.dim.Render(m.uri) + "\n\n")
 		b.WriteString("Enter one valid code: " + m.codeInput.View() + "\n")
+		if m.copied != "" {
+			b.WriteString(m.th.ok.Render(m.copied) + "\n")
+		}
 	case screenGate:
 		if m.gateForm != nil {
 			b.WriteString(m.gateForm.View())
@@ -346,6 +364,40 @@ func (m *Onboarding) View() string {
 	if m.errMsg != "" {
 		b.WriteString("\n" + m.th.errS.Render(m.errMsg) + "\n")
 	}
-	b.WriteString("\n" + m.th.dim.Render("enter continue • tab next field • esc back • ctrl+c abort"))
+	footer := "enter continue • tab next field • esc back • ctrl+c abort"
+	if m.screen == screen2FA {
+		footer = "enter continue • esc back • ctrl+c copy 2fa uri"
+	}
+	b.WriteString("\n" + m.th.dim.Render(footer))
 	return fit(b.String(), m.width, m.height)
+}
+
+// renderQR renders the otpauth URI as a terminal QR code using half-block
+// glyphs, so it stays scannable with NO_COLOR and on any background.
+func renderQR(uri string) string {
+	var buf bytes.Buffer
+	qrterminal.GenerateWithConfig(uri, qrterminal.Config{
+		Level:          qr.L,
+		Writer:         &buf,
+		HalfBlocks:     true,
+		BlackChar:      "█",
+		WhiteChar:      " ",
+		BlackWhiteChar: "▀",
+		WhiteBlackChar: "▄",
+		QuietZone:      1,
+	})
+	return buf.String()
+}
+
+// copyToClipboard writes text through Deps.CopyText and reports the outcome
+// in one line. A missing clipboard utility is a message, not a crash.
+func copyToClipboard(d *Deps, text string) string {
+	fn := d.CopyText
+	if fn == nil {
+		return "clipboard unavailable"
+	}
+	if err := fn(text); err != nil {
+		return "clipboard unavailable"
+	}
+	return "copied 2FA URI to clipboard"
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
@@ -186,6 +187,7 @@ func (d *Deps) tuiDeps() *tui.Deps {
 		Vault:    d.Vault,
 		Version:  Version,
 		StartDir: ".",
+		CopyText: clipboard.WriteAll,
 	}
 }
 

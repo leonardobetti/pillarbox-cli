@@ -316,3 +316,50 @@ func TestHomeMenuTabNavigation(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 }
+
+func TestOnboarding2FAQRCodeAndCopy(t *testing.T) {
+	deps := testDeps(t)
+	var copied []string
+	deps.CopyText = func(s string) error {
+		copied = append(copied, s)
+		return nil
+	}
+
+	tm := teatest.NewTestModel(t, NewOnboarding(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+
+	tm.Send(key(tea.KeyEnter)) // welcome -> mode
+	waitFor(t, tm, a, "Unlock mode")
+	tm.Send(key(tea.KeyDown))
+	tm.Send(key(tea.KeyDown)) // password+2fa
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Secret (")
+	for _, r := range "correct horse battery staple" {
+		tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	tm.Send(key(tea.KeyEnter)) // -> confirm
+	for _, r := range "correct horse battery staple" {
+		tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	tm.Send(key(tea.KeyEnter)) // -> 2FA screen
+
+	// The 2FA screen renders the QR code (block glyphs) and the URI.
+	waitFor(t, tm, a, "█", "otpauth://")
+
+	// Ctrl+C on the 2FA screen copies the URI instead of quitting.
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	waitFor(t, tm, a, "copied 2FA URI to clipboard")
+	if len(copied) != 1 || !strings.HasPrefix(copied[0], "otpauth://") {
+		t.Fatalf("clipboard got %q, want the otpauth URI", copied)
+	}
+
+	// Esc back to welcome, then Ctrl+C quits; no keystore is written.
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.WaitFinished(t)
+	if ok, _ := deps.Store.Exists(); ok {
+		t.Fatal("keystore written despite Esc before the last screen")
+	}
+}
