@@ -244,15 +244,15 @@ func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 	}
 
 	// Any key on the result screen returns to the Encrypt tab; then switch.
-	// Use a fresh accumulator so "Secret (password)" from encrypt does not
-	// satisfy the decrypt wait immediately.
+	// Use a fresh accumulator so encrypt's secret screen does not satisfy
+	// the decrypt wait immediately.
 	tm.Send(key(tea.KeyEnter))
 	a2 := &acc{}
 	waitFor(t, tm, a2, "Select a file to encrypt")
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // -> Decrypt
 	waitFor(t, tm, a2, "Select a .pbx file to decrypt")
 	pickPBX(tm)
-	waitFor(t, tm, a2, "Secret (password)")
+	waitFor(t, tm, a2, "a.txt.pbx", "This file needs a passphrase.")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter))
 

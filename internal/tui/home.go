@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"filippo.io/age"
@@ -394,7 +395,11 @@ func (m *Home) runPicked(msg pickedMsg) {
 
 func (m *Home) startSecret(mode keystore.Mode, action string) {
 	m.pendingMode = mode
-	m.prompt = newSecretPrompt(m.deps, mode, action)
+	file := ""
+	if action == "decrypt" {
+		file = m.pendingPath
+	}
+	m.prompt = newSecretPrompt(m.deps, mode, action, file)
 	m.screen = homeSecret
 }
 
@@ -677,21 +682,29 @@ type secretPrompt struct {
 	th     theme
 	mode   keystore.Mode
 	action string
+	file   string // basename of the .pbx when decrypting; empty otherwise
 	pw     textinput.Model
 	code   textinput.Model
 	focus  int
 	errMsg string
 }
 
-func newSecretPrompt(d *Deps, mode keystore.Mode, action string) *secretPrompt {
+func newSecretPrompt(d *Deps, mode keystore.Mode, action, file string) *secretPrompt {
 	th := newTheme(os.Stdout)
 	pw := textinput.New()
 	pw.EchoMode = textinput.EchoPassword
-	pw.Placeholder = "Secret"
+	if mode.HasDeviceSecret() {
+		pw.Placeholder = "PIN"
+	} else {
+		pw.Placeholder = "Passphrase"
+	}
 	pw.Focus()
 	code := textinput.New()
-	code.Placeholder = "6-digit code"
-	return &secretPrompt{deps: d, th: th, mode: mode, action: action, pw: pw, code: code}
+	code.Placeholder = "6-digit 2FA code"
+	return &secretPrompt{
+		deps: d, th: th, mode: mode, action: action,
+		file: filepath.Base(file), pw: pw, code: code,
+	}
 }
 
 func (p *secretPrompt) Init() tea.Cmd { return nil }
@@ -742,11 +755,22 @@ func (p *secretPrompt) updateInputs(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (p *secretPrompt) ContentView() string {
 	var b strings.Builder
-	b.WriteString("Secret (" + string(p.mode) + ")\n\n")
+	if p.action == "decrypt" {
+		if p.file != "" {
+			b.WriteString(p.file + "\n")
+		}
+		b.WriteString(p.th.accent.Render(p.mode.NeedsSummary()) + "\n\n")
+	} else {
+		b.WriteString("Secret (" + string(p.mode) + ")\n\n")
+	}
 	for _, rule := range auth.SecretRules(p.mode) {
 		b.WriteString(p.th.dim.Render(rule) + "\n")
 	}
-	b.WriteString("\nSecret: " + p.pw.View() + "\n")
+	label := "Passphrase: "
+	if p.mode.HasDeviceSecret() {
+		label = "PIN: "
+	}
+	b.WriteString("\n" + label + p.pw.View() + "\n")
 	if p.mode.Has2FA() && p.action == "decrypt" {
 		b.WriteString("2FA code: " + p.code.View() + "\n")
 	}
