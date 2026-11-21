@@ -249,11 +249,11 @@ func (d *Deps) keyType() (keystore.Mode, error) {
 	return st.KeyType, nil
 }
 
-// buildFileKey creates the per-file keystore for dst: secret from the user,
-// device secret for PIN modes, TOTP seed for 2FA modes, and a fresh age
-// identity wrapped under the KEK. The keystore is saved atomically at
-// dst + ".key", mode 0600. It returns the keystore and the raw recovery key.
-func (d *Deps) buildFileKey(mode keystore.Mode, dst string) (*keystore.Keystore, string, error) {
+// buildFileKey creates the per-file key for a new .pbx: secret from the
+// user, device secret for PIN modes, TOTP seed for 2FA modes, and a fresh age
+// identity wrapped under the KEK. The key is embedded in the .pbx header at
+// lock time. It returns the keystore and the raw recovery key.
+func (d *Deps) buildFileKey(mode keystore.Mode) (*keystore.Keystore, string, error) {
 	secret, err := d.readSecret(false)
 	if err != nil {
 		return nil, "", err
@@ -302,19 +302,15 @@ func (d *Deps) buildFileKey(mode keystore.Mode, dst string) (*keystore.Keystore,
 	if err != nil {
 		return nil, "", &exitError{ExitOther, "cannot build file key"}
 	}
-	store := keystore.NewStore(dst + ".key")
-	if err := store.Save(ks); err != nil {
-		return nil, "", &exitError{ExitOther, "cannot write file key"}
-	}
 	return ks, identity.String(), nil
 }
 
-// loadFileKey loads the per-file keystore sidecar for a .pbx file. Missing or
-// invalid sidecar is exit 5.
+// loadFileKey loads the per-file key embedded in the .pbx header (or the
+// v0.2.0 sidecar). Missing or invalid key is exit 5.
 func (d *Deps) loadFileKey(src string) (*keystore.Keystore, error) {
-	ks, err := keystore.NewStore(src + ".key").Load()
+	ks, err := d.Vault.ReadKey(src)
 	if errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid) {
-		return nil, &exitError{ExitKeystore, "no key for this file or key file invalid"}
+		return nil, &exitError{ExitKeystore, "no key for this file or key invalid"}
 	}
 	if err != nil {
 		return nil, &exitError{ExitOther, "cannot read file key"}

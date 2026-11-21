@@ -1,6 +1,9 @@
 package vault
 
 import (
+	"bufio"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,10 +12,18 @@ import (
 	"strings"
 
 	"filippo.io/age"
+
+	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
 )
 
 // pbxExt is the default output extension for single files, PRD section 6.1.
 const pbxExt = ".pbx"
+
+// headerMagic prefixes the first line of a single-file .pbx. The line is
+// "PBX1 <base64 JSON keystore>\n", and the age payload follows byte for byte.
+// The payload itself is a standard age file, so the recovery key still
+// decrypts it after stripping the first line.
+const headerMagic = "PBX1 "
 
 // ageVault is the Vault implementation backed by filippo.io/age.
 type ageVault struct{}
@@ -22,11 +33,11 @@ func New() Vault {
 	return ageVault{}
 }
 
-// Lock encrypts src, a single file, PRD 7.3. The plaintext streams through
-// age.Encrypt into a temp file in the output directory; only a clean close is
-// fsynced and renamed onto the final name, so a failure leaves no partial
-// output. Folders return ErrUnsupported.
-func (v ageVault) Lock(src string, recipient string, opts LockOptions) (string, error) {
+// Lock encrypts src, a single file, into one self-contained .pbx: PBX1 header
+// line plus the age stream. The plaintext streams into a temp file in the
+// output directory; only a clean close is fsynced and renamed, so a failure
+// leaves no partial output. Folders return ErrUnsupported.
+func (v ageVault) Lock(src string, ks *keystore.Keystore, opts LockOptions) (string, error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", err
@@ -34,13 +45,13 @@ func (v ageVault) Lock(src string, recipient string, opts LockOptions) (string, 
 	if info.IsDir() {
 		return "", ErrUnsupported
 	}
-	return v.lockFile(src, recipient, opts)
+	return v.lockFile(src, ks, opts)
 }
 
-// Unlock decrypts src, a .pbx single file, PRD 7.4. Every failure from age
-// (wrong identity, flipped, truncated or appended bytes) is wrapped as
-// ErrIntegrity and partial output is removed. Folder archives return
-// ErrUnsupported.
+// Unlock decrypts src with identity, skipping the PBX1 header line when
+// present. Every failure from age (wrong identity, flipped, truncated or
+// appended bytes) is wrapped as ErrIntegrity and partial output is removed.
+// Folder archives return ErrUnsupported.
 func (v ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) (string, error) {
 	if strings.HasSuffix(src, ".tar.pbx") {
 		return "", ErrUnsupported
@@ -48,8 +59,65 @@ func (v ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) 
 	return v.unlockFile(src, identity, opts)
 }
 
-func (v ageVault) lockFile(src, recipient string, opts LockOptions) (string, error) {
-	r, err := parseRecipient(recipient)
+// ReadKey returns the file's key: the PBX1 header of a single-file .pbx, or
+// the <file>.pbx.key sidecar written by v0.2.0.
+func (v ageVault) ReadKey(src string) (*keystore.Keystore, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = in.Close() }()
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if strings.HasPrefix(line, headerMagic) {
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(line, headerMagic)))
+		if err != nil {
+			return nil, fmt.Errorf("%w: bad PBX1 header", keystore.ErrInvalid)
+		}
+		ks, err := keystore.Parse(raw)
+		if err != nil {
+			return nil, err
+		}
+		return ks, nil
+	}
+	// v0.2.0 two-file format: key in the sidecar.
+	return keystore.NewStore(src + ".key").Load()
+}
+
+// SaveKey rewrites the PBX1 header of src with ks and copies the encrypted
+// payload unchanged, atomically via temp file + rename.
+func (v ageVault) SaveKey(src string, ks *keystore.Keystore) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	br := bufio.NewReader(in)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(line, headerMagic) {
+		return fmt.Errorf("%w: not a single-file .pbx", keystore.ErrInvalid)
+	}
+	meta, err := json.Marshal(ks)
+	if err != nil {
+		return err
+	}
+	header := headerMagic + base64.StdEncoding.EncodeToString(meta) + "\n"
+	return writeAtomic(src, func(w io.Writer) error {
+		if _, err := io.WriteString(w, header); err != nil {
+			return err
+		}
+		_, err := io.Copy(w, br)
+		return err
+	})
+}
+
+func (v ageVault) lockFile(src string, ks *keystore.Keystore, opts LockOptions) (string, error) {
+	r, err := parseRecipient(ks.Recipient)
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +135,16 @@ func (v ageVault) lockFile(src, recipient string, opts LockOptions) (string, err
 	}
 	defer func() { _ = in.Close() }()
 
+	meta, err := json.Marshal(ks)
+	if err != nil {
+		return "", err
+	}
+	header := headerMagic + base64.StdEncoding.EncodeToString(meta) + "\n"
+
 	err = writeAtomic(dst, func(w io.Writer) error {
+		if _, err := io.WriteString(w, header); err != nil {
+			return err
+		}
 		enc, err := age.Encrypt(w, r)
 		if err != nil {
 			return err
@@ -109,8 +186,18 @@ func (v ageVault) unlockFile(src string, identity age.Identity, opts UnlockOptio
 		return "", err
 	}
 
+	// Skip the PBX1 header line when present; otherwise the whole stream is
+	// the age payload (v0.2.0 sidecar format).
+	br := bufio.NewReader(in)
+	payload := io.Reader(br)
+	if line, lerr := br.ReadString('\n'); lerr == nil && strings.HasPrefix(line, headerMagic) {
+		payload = br
+	} else {
+		payload = io.MultiReader(strings.NewReader(line), br)
+	}
+
 	err = writeAtomic(dst, func(w io.Writer) error {
-		dec, err := age.Decrypt(in, identity)
+		dec, err := age.Decrypt(payload, identity)
 		if err != nil {
 			return streamErr{err}
 		}

@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"os"
 	"strings"
 
 	"filippo.io/age"
 	"github.com/spf13/cobra"
 
-	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
 	"github.com/leonardobetti/pillarbox-cli/internal/vault"
 )
 
@@ -54,21 +52,16 @@ func (d *Deps) runLock(path, out string, removeOriginal, force bool) error {
 	if err != nil {
 		return err
 	}
-	dst := out
-	if dst == "" {
-		dst = path + ".pbx"
-	}
-	ks, recovery, err := d.buildFileKey(mode, dst)
+	ks, recovery, err := d.buildFileKey(mode)
 	if err != nil {
 		return err
 	}
-	locked, err := d.Vault.Lock(path, ks.Recipient, vault.LockOptions{
+	locked, err := d.Vault.Lock(path, ks, vault.LockOptions{
 		Out:            out,
 		RemoveOriginal: removeOriginal,
 		Force:          force,
 	})
 	if err != nil {
-		_ = os.Remove(dst + ".key")
 		return mapVaultErr(err)
 	}
 	if !d.opts.quiet {
@@ -95,7 +88,7 @@ func (d *Deps) runUnlock(src, out string, force bool) error {
 	}
 	if ks.Mode.Has2FA() {
 		ks.LastTOTPStep = &newStep
-		if err := keystore.NewStore(src + ".key").Save(ks); err != nil {
+		if err := d.Vault.SaveKey(src, ks); err != nil {
 			d.warn("warning: could not persist the TOTP step")
 		}
 	}

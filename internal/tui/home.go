@@ -315,9 +315,9 @@ func (m *Home) runPicked(msg pickedMsg) {
 			m.setResult("", errors.New("select a .pbx file"))
 			return
 		}
-		ks, err := keystore.NewStore(msg.path + ".key").Load()
+		ks, err := m.deps.Vault.ReadKey(msg.path)
 		if err != nil {
-			m.setResult("", errors.New("no key for this file or key file invalid"))
+			m.setResult("", errors.New("no key for this file or key invalid"))
 			return
 		}
 		m.pendingPath = msg.path
@@ -357,7 +357,7 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 	}
 	if m.pendingKS.Mode.Has2FA() {
 		m.pendingKS.LastTOTPStep = &step
-		_ = keystore.NewStore(m.pendingPath + ".key").Save(m.pendingKS)
+		_ = m.deps.Vault.SaveKey(m.pendingPath, m.pendingKS)
 	}
 	identity, err := age.ParseX25519Identity(string(id))
 	if err != nil {
@@ -395,15 +395,9 @@ func (m *Home) doEncrypt(secret string, seed []byte) {
 		m.setResult("", err)
 		return
 	}
-	dst := m.pendingPath + ".pbx"
-	locked, err := m.deps.Vault.Lock(m.pendingPath, ks.Recipient, vault.LockOptions{})
+	locked, err := m.deps.Vault.Lock(m.pendingPath, ks, vault.LockOptions{})
 	if err != nil {
 		m.setResult("", err)
-		return
-	}
-	if err := keystore.NewStore(dst + ".key").Save(ks); err != nil {
-		_ = os.Remove(locked)
-		m.setResult("", errors.New("cannot write file key"))
 		return
 	}
 	m.setResult(locked+"\nrecovery key (shown once): "+identity.String(), nil)

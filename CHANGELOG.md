@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Single-file output: `lock` now writes one `.pbx` containing a `PBX1` header line (the file's wrapped key as base64 JSON) followed by the standard age payload. The `.key` sidecar is gone. `unlock` still reads v0.2.0 two-file output via the sidecar. Stock age decrypts the payload with `tail -n +2 file.pbx | age -d -i key.txt`.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added

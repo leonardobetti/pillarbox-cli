@@ -27,8 +27,8 @@ The install script verifies the archive against `checksums.txt` from the release
 Run this on a clean machine. It takes under a minute.
 
 1. Run `pillarbox`. Pillarbox guides you through five screens: what it does, the unlock mode, your secret, 2FA setup if you chose a 2FA mode, and your recovery key. Save the recovery key. Pillarbox shows it once.
-2. Encrypt a file: `pillarbox lock .env` creates `.env.pbx` and `.env.pbx.key`. Each file gets its own key; the key type comes from Settings, and you type the secret each time.
-3. Decrypt it back: `pillarbox unlock .env.pbx` reads `.env.pbx.key` and asks for the secret.
+2. Encrypt a file: `pillarbox lock .env` creates a single `.env.pbx`. The file carries its own key in a `PBX1` header line followed by a standard age payload; the key type comes from Settings, and you type the secret each time.
+3. Decrypt it back: `pillarbox unlock .env.pbx` reads the embedded key and asks for the secret.
 
 For scripts, skip the screens and pipe the secret:
 
@@ -38,7 +38,7 @@ printf '%s\n' "$MY_SECRET" | pillarbox --no-tui --secret-stdin lock .env
 
 ## Unlock modes
 
-Onboarding picks one of four key types and stores it in Settings. Every encrypted file gets its own key, stored next to it as `<file>.pbx.key`. The secret screen states the rules for the chosen mode, and why they exist, before you type anything:
+Onboarding picks one of four key types and stores it in Settings. Every encrypted file gets its own key, embedded in the `.pbx` itself. The secret screen states the rules for the chosen mode, and why they exist, before you type anything:
 
 | Mode | Secret | Device secret in the key | TOTP check |
 | --- | --- | --- | --- |
@@ -65,10 +65,10 @@ The recovery key is an `age` secret key. With it, the stock `age` tool decrypts 
    pillarbox export-key > key.txt && chmod 600 key.txt
    ```
 
-2. Decrypt:
+2. Decrypt. The `.pbx` is a `PBX1` header line plus a standard age payload, so strip the first line:
 
    ```sh
-   age -d -i key.txt file.pbx > file
+   tail -n +2 file.pbx | age -d -i key.txt > file
    ```
 
 ## Keys

@@ -181,12 +181,15 @@ func TestHomeEncryptFileWithOwnKey(t *testing.T) {
 	if _, err := os.Stat(pbx); err != nil {
 		t.Fatalf("no .pbx output: %v", err)
 	}
-	ks, err := keystore.NewStore(pbx + ".key").Load()
+	ks, err := vault.New().ReadKey(pbx)
 	if err != nil {
-		t.Fatalf("no per-file key sidecar: %v", err)
+		t.Fatalf("no embedded key in .pbx: %v", err)
 	}
 	if ks.Mode != keystore.ModePassword {
-		t.Fatalf("sidecar mode = %q, want password", ks.Mode)
+		t.Fatalf("embedded key mode = %q, want password", ks.Mode)
+	}
+	if _, err := os.Stat(pbx + ".key"); !os.IsNotExist(err) {
+		t.Fatal("sidecar .key file should not exist anymore")
 	}
 }
 
@@ -215,7 +218,7 @@ func TestHomeEncryptAsksKeyTypeWhenUnset(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
-	ks, err := keystore.NewStore(filepath.Join(deps.StartDir, "a.txt.pbx.key")).Load()
+	ks, err := vault.New().ReadKey(filepath.Join(deps.StartDir, "a.txt.pbx"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +309,8 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx")); err != nil {
 		t.Fatalf("no .pbx output: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx.key")); err != nil {
-		t.Fatalf("no per-file key sidecar: %v", err)
+	b, err := os.ReadFile(filepath.Join(deps.StartDir, "a.txt.pbx"))
+	if err != nil || !strings.HasPrefix(string(b), "PBX1 ") {
+		t.Fatalf("no single-file PBX1 output: %v", err)
 	}
 }

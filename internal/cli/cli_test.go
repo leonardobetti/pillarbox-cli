@@ -166,11 +166,15 @@ func TestCommandsTable(t *testing.T) {
 			wantOut:  ".pbx",
 			check: func(t *testing.T, e *env, out, errOut string) {
 				dst := strings.TrimSpace(strings.Split(out, "\n")[0])
-				if _, err := os.Stat(dst); err != nil {
+				b, err := os.ReadFile(dst)
+				if err != nil {
 					t.Fatalf("no output file: %v", err)
 				}
-				if _, err := os.Stat(dst + ".key"); err != nil {
-					t.Fatalf("no per-file key sidecar: %v", err)
+				if !strings.HasPrefix(string(b), "PBX1 ") {
+					t.Fatal("output is not a single-file PBX1 .pbx")
+				}
+				if _, err := os.Stat(dst + ".key"); !os.IsNotExist(err) {
+					t.Fatal("sidecar .key file should not exist anymore")
 				}
 			},
 		},
@@ -243,7 +247,7 @@ func TestCommandsTable(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				b[len(b)/2] ^= 0x01
+				b[len(b)-10] ^= 0x01 // flip a byte in the age payload, past the PBX1 header
 				if err := os.WriteFile(e.pbx, b, 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -281,10 +285,13 @@ func TestCommandsTable(t *testing.T) {
 			wantErr:  "--secret-stdin",
 		},
 		{
-			name:  "unlock without sidecar key exits 5",
-			setup: func(t *testing.T, e *env) { initPassword(t, e) },
+			name: "unlock without embedded key exits 5",
+			setup: func(t *testing.T, e *env) {
+				initPassword(t, e)
+				makeFile(t, e, "orphan.pbx", "not a pillarbox file")
+			},
 			args: func(t *testing.T, e *env) []string {
-				return []string{"unlock", filepath.Join(e.dir, "none.pbx"), "--no-tui", "--secret-stdin"}
+				return []string{"unlock", filepath.Join(e.dir, "orphan.pbx"), "--no-tui", "--secret-stdin"}
 			},
 			stdin:    testSecret + "\n",
 			wantExit: ExitKeystore,
