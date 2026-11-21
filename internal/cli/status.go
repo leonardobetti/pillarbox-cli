@@ -25,6 +25,6 @@ func (d *Deps) runStatus() error {
 	if keyType == "" {
 		keyType = "(not set)"
 	}
-	d.printf("key type: %s\ngate-encrypt: %t\nsettings: %s\nversion: %s\n", keyType, st.GateEncrypt, d.Settings.Path(), Version)
+	d.printf("key type: %s\nauth-encrypt: %t\nsettings: %s\nversion: %s\n", keyType, st.AuthEncrypt, d.Settings.Path(), Version)
 	return nil
 }

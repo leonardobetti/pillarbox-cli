@@ -59,6 +59,12 @@ type twofaDoneMsg struct {
 
 type promptCancelledMsg struct{}
 
+type modeItem string
+
+func (m modeItem) FilterValue() string { return string(m) }
+func (m modeItem) Title() string       { return string(m) }
+func (m modeItem) Description() string { return "" }
+
 // Home is the home shell: horizontal tabs, a bordered content box, and a
 // keybinding footer. Every file is encrypted with its own key; the key type
 // comes from Settings and is asked for when unset.
@@ -116,7 +122,7 @@ func NewHome(d *Deps) *Home {
 		chooser: cl,
 	}
 	h.reloadSettings()
-	h.openPicker("encrypt", "Select a file to encrypt")
+	h.activateTab()
 	return h
 }
 
@@ -197,6 +203,11 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Type == tea.KeyEnter {
 				if it, ok := m.chooser.SelectedItem().(modeItem); ok {
 					m.pendingMode = keystore.Mode(it)
+					// Persist the choice so Settings keeps it between sessions.
+					m.settings.KeyType = m.pendingMode
+					if err := m.deps.Settings.Save(m.settings); err != nil {
+						m.settingsErr = "cannot write settings"
+					}
 					m.startSecret(m.pendingMode, "encrypt")
 				}
 			}
@@ -263,6 +274,12 @@ func (m *Home) activateTab() {
 	m.pendingKS = nil
 	switch m.tab {
 	case tabEncrypt:
+		// With "require authentication to encrypt" on, the secret is asked
+		// before the file picker and reused for the file's key.
+		if m.settings.AuthEncrypt && m.settings.KeyType.Valid() {
+			m.startSecret(m.settings.KeyType, "gate")
+			break
+		}
 		m.openPicker("encrypt", "Select a file to encrypt")
 	case tabDecrypt:
 		m.openPicker("decrypt", "Select a .pbx file to decrypt")
@@ -282,20 +299,11 @@ func (m *Home) activateTab() {
 }
 
 func (m *Home) returnToTab() {
+	// Re-enter the active tab's default content. Clears pending encrypt state.
 	m.pendingSecret = ""
-	switch m.tab {
-	case tabEncrypt:
-		m.openPicker("encrypt", "Select a file to encrypt")
-	case tabDecrypt:
-		m.openPicker("decrypt", "Select a .pbx file to decrypt")
-	case tabStatus:
-		m.statusText = m.statusView()
-		m.screen = homeStatus
-	case tabSettings:
-		m.screen = homeSettings
-	case tabHelp:
-		m.screen = homeHelp
-	}
+	m.pendingPath = ""
+	m.pendingKS = nil
+	m.activateTab()
 }
 
 // updateSettings is a stable option list: one keypress, one action, no loop.
@@ -333,7 +341,7 @@ func (m *Home) toggleSetting(i int) {
 		}
 		m.settings.KeyType = modes[(cur+1)%len(modes)]
 	} else {
-		m.settings.GateEncrypt = !m.settings.GateEncrypt
+		m.settings.AuthEncrypt = !m.settings.AuthEncrypt
 	}
 }
 
@@ -348,6 +356,11 @@ func (m *Home) runPicked(msg pickedMsg) {
 	switch msg.action {
 	case "encrypt":
 		m.pendingPath = msg.path
+		if m.pendingSecret != "" {
+			// Secret already collected at the auth gate.
+			m.startEncryptWithSecret(m.pendingMode, m.pendingSecret)
+			return
+		}
 		if !m.settings.KeyType.Valid() {
 			m.screen = homeChooser
 			return
@@ -376,19 +389,15 @@ func (m *Home) startSecret(mode keystore.Mode, action string) {
 }
 
 func (m *Home) runPromptDone(msg promptDoneMsg) {
+	if msg.action == "gate" {
+		// Auth gate passed: keep the secret and go pick the file.
+		m.pendingMode = msg.mode
+		m.pendingSecret = msg.secret
+		m.openPicker("encrypt", "Select a file to encrypt")
+		return
+	}
 	if msg.action == "encrypt" {
-		if msg.mode.Has2FA() {
-			seed, uri, err := m.deps.TOTP.GenerateSeed()
-			if err != nil {
-				m.setResult("", errors.New("cannot generate 2FA seed"))
-				return
-			}
-			m.twofa = newTwofaPrompt(m.deps, seed, uri)
-			m.pendingSecret = msg.secret
-			m.screen = home2FA
-			return
-		}
-		m.doEncrypt(msg.secret, nil)
+		m.startEncryptWithSecret(msg.mode, msg.secret)
 		return
 	}
 	// decrypt
@@ -407,12 +416,33 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 		m.setResult("", err)
 		return
 	}
-	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{})
+	// The TUI overwrites the original when it still exists next to the .pbx.
+	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{Force: true})
 	m.setResult(dst, err)
 }
 
+// startEncryptWithSecret runs the encrypt flow with an already collected
+// secret: the 2FA QR screen for 2FA modes, otherwise the lock right away.
+func (m *Home) startEncryptWithSecret(mode keystore.Mode, secret string) {
+	m.pendingMode = mode
+	m.pendingSecret = secret
+	if mode.Has2FA() {
+		seed, uri, err := m.deps.TOTP.GenerateSeed()
+		if err != nil {
+			m.setResult("", errors.New("cannot generate 2FA seed"))
+			return
+		}
+		m.twofa = newTwofaPrompt(m.deps, seed, uri)
+		m.screen = home2FA
+		return
+	}
+	m.doEncrypt(secret, nil)
+}
+
 func (m *Home) run2FADone(msg twofaDoneMsg) {
-	m.doEncrypt(m.pendingSecret, msg.seed)
+	secret := m.pendingSecret
+	m.pendingSecret = ""
+	m.doEncrypt(secret, msg.seed)
 }
 
 func (m *Home) doEncrypt(secret string, seed []byte) {
@@ -443,6 +473,7 @@ func (m *Home) doEncrypt(secret string, seed []byte) {
 		m.setResult("", err)
 		return
 	}
+	m.pendingSecret = ""
 	m.setResult(locked+"\nrecovery key (shown once): "+identity.String(), nil)
 }
 
@@ -462,8 +493,8 @@ func (m *Home) statusView() string {
 	if keyType == "" {
 		keyType = "(not set)"
 	}
-	return fmt.Sprintf("key type: %s\ngate-encrypt: %t\nsettings: %s\nversion: %s",
-		keyType, m.settings.GateEncrypt, m.deps.Settings.Path(), m.deps.Version)
+	return fmt.Sprintf("key type: %s\nauth-encrypt: %t\nsettings: %s\nversion: %s",
+		keyType, m.settings.AuthEncrypt, m.deps.Settings.Path(), m.deps.Version)
 }
 
 // chromeLines is the fixed vertical cost of header + tabs + footer around the box.
@@ -555,13 +586,13 @@ func (m *Home) contentBody(innerH int) string {
 		if keyType == "" {
 			keyType = "(not set)"
 		}
-		gate := "no"
-		if m.settings.GateEncrypt {
-			gate = "yes"
+		auth := "no"
+		if m.settings.AuthEncrypt {
+			auth = "yes"
 		}
 		var b strings.Builder
 		b.WriteString("Settings\n\n")
-		for i, line := range []string{"Key type: " + keyType, "Gate encrypt: " + gate} {
+		for i, line := range []string{"Key type: " + keyType, "Require authentication to encrypt: " + auth} {
 			marker := "  "
 			if i == m.setCursor {
 				marker = "> "

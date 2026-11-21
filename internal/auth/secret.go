@@ -7,17 +7,12 @@ import (
 )
 
 // SecretRules returns the requirements for the secret of a mode, shown before
-// the user types so a rejected secret is never a surprise. Each rule carries
-// the reason it exists, PRD sections 6.2 and 6.3. Keep in sync with
+// the user types so a rejected secret is never a surprise. Keep in sync with
 // ValidateSecret.
 func SecretRules(m keystore.Mode) []string {
 	rules := []string{}
 	if m.HasDeviceSecret() {
-		rules = append(rules,
-			"PIN: 6 to 12 digits, numbers only.",
-			"You need 6 digits minimum because a 6-digit PIN has only 1,000,000 values, about six days of guessing on one core at this Argon2id cost.",
-			"You need the device secret too: PIN modes mix a 32-byte secret from this machine into the key, so the PIN alone only protects you if someone copies your whole config folder.",
-		)
+		rules = append(rules, "PIN: 6 to 12 digits, numbers only.")
 	} else {
 		rules = append(rules,
 			"Passphrase: at least 12 characters.",

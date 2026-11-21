@@ -4,7 +4,7 @@ Pillarbox encrypts and decrypts files from the terminal. It needs no mouse, no a
 
 ## The problem
 
-Cryptomator encrypts files with a key hierarchy, authenticated encryption and a passphrase unlock, but it needs a graphical interface. Tools like `age`, `gpg` and `openssl` expose low-level building blocks and leave onboarding, secret handling and 2FA (two-factor authentication) to you. Pillarbox gives terminal users the same approach as a keyboard-driven command. Set up once, then run `lock` and `unlock`.
+Cryptomator encrypts files with a key hierarchy, authenticated encryption and a passphrase unlock, but it needs a graphical interface. Tools like `age`, `gpg` and `openssl` expose low-level building blocks and leave secret handling and 2FA (two-factor authentication) to you. Pillarbox gives terminal users the same approach as a keyboard-driven command. Open the home menu, pick a file, then run `lock` and `unlock`.
 
 ## Install
 
@@ -26,9 +26,9 @@ The install script verifies the archive against `checksums.txt` from the release
 
 Run this on a clean machine. It takes under a minute.
 
-1. Run `pillarbox`. Pillarbox guides you through five screens: what it does, the unlock mode, your secret, 2FA setup if you chose a 2FA mode, and your recovery key. Save the recovery key. Pillarbox shows it once.
-2. Encrypt a file: `pillarbox lock .env` creates a single `.env.pbx`. The file carries its own key in a `PBX1` header line followed by a standard age payload; the key type comes from Settings, and you type the secret each time.
-3. Decrypt it back: `pillarbox unlock .env.pbx` reads the embedded key and asks for the secret.
+1. Run `pillarbox` on a terminal. The home menu opens straight away (Encrypt, Decrypt, Status, Settings, Help). Choose a key type in Settings, or the first Encrypt asks and saves it.
+2. Encrypt a file: `pillarbox lock .env` creates a single `.env.pbx`. The file carries its own key in a `PBX1` header line followed by a standard age payload; you type the secret each time. Save the recovery key when shown — Pillarbox prints it once.
+3. Decrypt it back: `pillarbox unlock .env.pbx` reads the embedded key and asks for the secret. In the TUI, decrypt overwrites an existing original next to the `.pbx`.
 
 For scripts, skip the screens and pipe the secret:
 
@@ -38,7 +38,7 @@ printf '%s\n' "$MY_SECRET" | pillarbox --no-tui --secret-stdin lock .env
 
 ## Unlock modes
 
-Onboarding picks one of four key types and stores it in Settings. Every encrypted file gets its own key, embedded in the `.pbx` itself. The secret screen states the rules for the chosen mode, and why they exist, before you type anything:
+Settings (or the first Encrypt) picks one of four key types. Every encrypted file gets its own key, embedded in the `.pbx` itself. The secret screen states the rules for the chosen mode before you type anything:
 
 | Mode | Secret | Device secret in the key | TOTP check |
 | --- | --- | --- | --- |
@@ -73,18 +73,18 @@ The recovery key is an `age` secret key. With it, the stock `age` tool decrypts 
 
 ## Keys
 
-Every screen shows its keys in the footer. In the menus: up/down arrows or Tab to navigate, Enter to select, Esc to go back, Q to quit, Ctrl+C to abort. In settings: Backspace flips the switch, A applies. In onboarding: Tab moves between fields.
+Every screen shows its keys in the footer. Tab or ←/→ switch the top tabs, ↑/↓ move inside the box, Enter selects, Backspace goes to the parent directory or cycles settings, Q quits, Ctrl+C aborts (or copies the 2FA URI). In Settings: ←/→ toggles the option, A applies.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `pillarbox` | Onboarding when there is no keystore, home menu otherwise |
+| `pillarbox` | Open the home menu on a TTY; print help (or exit 5 if no settings) without a TTY |
 | `pillarbox lock <path> [-o OUT] [--remove-original] [--force]` | Encrypt a file |
 | `pillarbox unlock <file.pbx> [-o OUT] [--force]` | Decrypt a `.pbx` file |
-| `pillarbox status` | Show key type, gate-encrypt, settings path and version |
+| `pillarbox status` | Show key type, auth-encrypt, settings path and version |
 | `pillarbox export-key <file.pbx>` | Print the recovery key of one file after authentication |
-| `pillarbox config set gate-encrypt true\|false` | Toggle the gate-encrypt setting |
+| `pillarbox config set auth-encrypt true\|false` | Require the secret before the encrypt file picker (default false) |
 | `pillarbox config set key-type MODE` | Set the key type used for new files |
 | `pillarbox version` | Print the version |
 

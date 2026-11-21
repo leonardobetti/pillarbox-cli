@@ -51,13 +51,8 @@ type WrappedKey struct {
 	Ciphertext []byte `json:"ciphertext"` // base64 in JSON
 }
 
-// Policy holds user settings, PRD section 7.2.
-type Policy struct {
-	// GateEncrypt makes lock authenticate first when true, PRD 7.3 step 1.
-	GateEncrypt bool `json:"gate_encrypt"`
-}
-
-// Keystore is the on-disk schema at <config>/pillarbox/keystore.json, PRD
+// Keystore is the on-disk schema of a per-file key, carried in the PBX1
+// header of a .pbx, PRD
 // section 7.2. Recipient is the age public key as a string; the identity
 // itself stays wrapped and is never stored in the clear.
 type Keystore struct {
@@ -69,7 +64,6 @@ type Keystore struct {
 	WrappedIdentity WrappedKey   `json:"wrapped_identity"`
 	WrappedTOTPSeed *WrappedKey  `json:"wrapped_totp_seed,omitempty"` // 2FA modes only
 	LastTOTPStep    *int64       `json:"last_totp_step,omitempty"`    // 2FA modes only, replay protection, PRD 7.2
-	Policy          Policy       `json:"policy"`
 	CreatedAt       time.Time    `json:"created_at"`
 }
 

@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Single-file output: `lock` now writes one `.pbx` containing a `PBX1` header line (the file's wrapped key as base64 JSON) followed by the standard age payload. The `.key` sidecar is gone. `unlock` still reads v0.2.0 two-file output via the sidecar. Stock age decrypts the payload with `tail -n +2 file.pbx | age -d -i key.txt`.
+- Home TUI layout: horizontal tabs (Encrypt, Decrypt, Status, Settings, Help), magenta bordered content box, and a keybinding footer. Bare `pillarbox` on a TTY opens the home menu directly.
+- Settings rename: `gate-encrypt` is now `auth-encrypt` (`Require authentication to encrypt`, default false). When enabled, Encrypt asks for the secret before the file picker and reuses it. The key-type chooser persists the choice to `settings.json`.
+- TUI decrypt overwrites an existing original next to the `.pbx` (`UnlockOptions{Force: true}`). CLI still requires `--force`.
+- PIN secret rules show only `PIN: 6 to 12 digits, numbers only.` The 2FA QR screen lays out the code entry beside the QR so it fits 80×24.
+
+### Removed
+
+- First-run onboarding flow (`RunOnboarding` / `onboarding.go`). Key type is set in Settings or asked on first Encrypt.
 
 ## [0.2.0] - 2026-11-21
 

@@ -331,16 +331,16 @@ func TestCommandsTable(t *testing.T) {
 			wantOut:  "key-type set",
 		},
 		{
-			name:     "config set gate-encrypt true",
+			name:     "config set auth-encrypt true",
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "gate-encrypt", "true"} },
+			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "auth-encrypt", "true"} },
 			wantExit: ExitOK,
-			wantOut:  "gate-encrypt set",
+			wantOut:  "auth-encrypt set",
 		},
 		{
 			name:     "config set bad value exits 2",
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "gate-encrypt", "maybe"} },
+			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "auth-encrypt", "maybe"} },
 			wantExit: ExitUsage,
 		},
 		{
@@ -350,10 +350,10 @@ func TestCommandsTable(t *testing.T) {
 			wantExit: ExitUsage,
 		},
 		{
-			name: "lock with gate-encrypt and no secret exits 2",
+			name: "lock with auth-encrypt and no secret exits 2",
 			setup: func(t *testing.T, e *env) {
 				initPassword(t, e)
-				if code, _, errOut := e.run(t, "", "config", "set", "gate-encrypt", "true"); code != ExitOK {
+				if code, _, errOut := e.run(t, "", "config", "set", "auth-encrypt", "true"); code != ExitOK {
 					t.Fatalf("config set: exit %d, %q", code, errOut)
 				}
 				e.src = makeFile(t, e, "a.txt", "hello")
@@ -362,10 +362,10 @@ func TestCommandsTable(t *testing.T) {
 			wantExit: ExitUsage,
 		},
 		{
-			name: "lock with gate-encrypt and secret-stdin",
+			name: "lock with auth-encrypt and secret-stdin",
 			setup: func(t *testing.T, e *env) {
 				initPassword(t, e)
-				if code, _, errOut := e.run(t, "", "config", "set", "gate-encrypt", "true"); code != ExitOK {
+				if code, _, errOut := e.run(t, "", "config", "set", "auth-encrypt", "true"); code != ExitOK {
 					t.Fatalf("config set: exit %d, %q", code, errOut)
 				}
 				e.src = makeFile(t, e, "a.txt", "hello")

@@ -150,24 +150,23 @@ func newRoot(d *Deps) *cobra.Command {
 	return cmd
 }
 
-// runRoot handles bare pillarbox, PRD 8.1 and 8.2. On a terminal without
-// --no-tui it runs onboarding when the keystore is missing and the home menu
-// otherwise; non-interactive it exits 5 or prints help.
+// runRoot handles bare pillarbox, PRD 8.2. On a terminal without --no-tui it
+// opens the home menu directly; the key type is chosen in Settings or asked
+// on first encrypt. Non-interactive it prints help, or exits 5 when no
+// settings exist yet.
 func (d *Deps) runRoot(cmd *cobra.Command) error {
-	exists, err := d.Settings.Exists()
-	if err == nil && !exists && d.interactive() {
-		if _, terr := tui.RunOnboarding(d.tuiDeps()); terr == nil {
-			exists, _ = d.Settings.Exists()
-		}
-	}
-	if err == nil && !exists {
-		return &exitError{ExitKeystore, "no settings; run pillarbox to set up"}
-	}
 	if d.interactive() {
 		if _, terr := tui.RunHome(d.tuiDeps()); terr != nil {
 			return &exitError{ExitOther, "the interactive UI exited with an error"}
 		}
 		return nil
+	}
+	exists, err := d.Settings.Exists()
+	if err != nil {
+		return &exitError{ExitOther, "cannot read settings"}
+	}
+	if !exists {
+		return &exitError{ExitKeystore, "no settings; run pillarbox on a terminal to set up"}
 	}
 	return cmd.Help()
 }
@@ -219,16 +218,11 @@ func exactArgs(n int, usage string) cobra.PositionalArgs {
 }
 
 // loadSettings loads the settings file. A missing file is empty settings, an
-// invalid one is exit 5. On a terminal, missing settings start onboarding.
+// invalid one is exit 5.
 func (d *Deps) loadSettings() (*keystore.Settings, error) {
 	st, err := d.Settings.Load()
-	if errors.Is(err, keystore.ErrInvalid) && d.interactive() {
-		if _, terr := tui.RunOnboarding(d.tuiDeps()); terr == nil {
-			st, err = d.Settings.Load()
-		}
-	}
 	if errors.Is(err, keystore.ErrInvalid) {
-		return nil, &exitError{ExitKeystore, "settings invalid; run pillarbox to set up"}
+		return nil, &exitError{ExitKeystore, "settings invalid; fix or remove the settings file"}
 	}
 	if err != nil {
 		return nil, &exitError{ExitOther, "cannot read settings"}
