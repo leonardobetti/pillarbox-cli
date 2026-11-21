@@ -32,7 +32,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned, not latest: v1.x binaries are built with an older Go and
+          # refuse to load a config that targets go 1.27.
+          version: v2.15.0
 
   e2e:
     name: scripts/e2e.sh
