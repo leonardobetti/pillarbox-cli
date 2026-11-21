@@ -288,7 +288,7 @@ func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 
 func TestTwofaViewFits24Lines(t *testing.T) {
 	deps := testDeps(t)
-	p := newTwofaPrompt(deps, bytes.Repeat([]byte{0x42}, 20),
+	p := newTwofaPrompt(deps, newTheme(nil, ThemeDefault), bytes.Repeat([]byte{0x42}, 20),
 		"otpauth://totp/pillarbox?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=pillarbox")
 	v := p.View()
 	lines := strings.Split(v, "\n")
@@ -337,12 +337,21 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // Encrypt -> Decrypt -> Status -> Settings
 	}
-	waitFor(t, tm, a, "Default for new files:", "Require authentication to encrypt: no", "apply")
+	waitFor(t, tm, a, "Default for new files:", "Require authentication to encrypt: no", "Theme: Default", "apply")
 
 	tm.Send(key(tea.KeyDown))                   // cursor -> auth-encrypt
 	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // toggle to yes
 	waitFor(t, tm, a, "Require authentication to encrypt: yes")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) // apply
+	tm.Send(key(tea.KeyDown)) // cursor -> Theme
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Choose a theme", "Type to filter", "Default")
+	tm.Type("drac")
+	waitFor(t, tm, a, "Filter: drac", "Dracula")
+	tm.Send(key(tea.KeyEnter)) // select first match
+	waitFor(t, tm, a, "Apply Dracula?", "apply", "cancel")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) // confirm theme
+	waitFor(t, tm, a, "Theme: Dracula")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) // apply settings
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

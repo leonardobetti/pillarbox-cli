@@ -30,6 +30,8 @@ const (
 	homeResult
 	homeConfirmDecrypt
 	homePostEncrypt
+	homeThemePicker
+	homeThemeConfirm
 )
 
 type postEncryptPhase int
@@ -105,6 +107,11 @@ type Home struct {
 	prompt  *secretPrompt
 	twofa   *twofaPrompt
 
+	themeBefore  string // theme id to restore if the theme picker is cancelled
+	themeFilter  string // live name filter in the theme picker
+	themeCursor  int    // index into the filtered theme list
+	themePending string // theme id waiting on the apply confirm screen
+
 	pendingPath   string             // file picked in the picker
 	pendingKS     *keystore.Keystore // sidecar loaded for decrypt
 	pendingMode   keystore.Mode
@@ -129,8 +136,6 @@ type Home struct {
 }
 
 func NewHome(d *Deps) *Home {
-	th := newTheme(os.Stdout)
-
 	modes := []list.Item{
 		modeItem(keystore.ModePassword),
 		modeItem(keystore.ModePIN),
@@ -149,7 +154,6 @@ func NewHome(d *Deps) *Home {
 
 	h := &Home{
 		deps:    d,
-		th:      th,
 		screen:  homePicker,
 		tab:     tabEncrypt,
 		width:   0,
@@ -157,6 +161,7 @@ func NewHome(d *Deps) *Home {
 		chooser: cl,
 	}
 	h.reloadSettings()
+	h.applyTheme(h.settings.Theme)
 	h.activateTab()
 	return h
 }
@@ -169,6 +174,10 @@ func (m *Home) reloadSettings() {
 		return
 	}
 	m.settings = st
+}
+
+func (m *Home) applyTheme(name string) {
+	m.th = newTheme(os.Stdout, name)
 }
 
 func (m *Home) Init() tea.Cmd { return nil }
@@ -236,6 +245,20 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.screen {
 			case homePicker, homeStatus, homeHelp, homeSettings:
 				return m, nil
+			case homeThemePicker:
+				if m.themeFilter != "" {
+					m.themeFilter = ""
+					m.clampThemeCursor()
+					m.previewThemeAtCursor()
+					return m, nil
+				}
+				m.cancelThemePicker()
+				return m, nil
+			case homeThemeConfirm:
+				m.themePending = ""
+				m.previewThemeAtCursor()
+				m.screen = homeThemePicker
+				return m, nil
 			case homePostEncrypt:
 				if m.postPhase == postRecoveryAck {
 					return m, nil
@@ -284,6 +307,10 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case homeSettings:
 			return m.updateSettings(msg)
+		case homeThemePicker:
+			return m.updateThemePicker(msg)
+		case homeThemeConfirm:
+			return m.updateThemeConfirm(msg)
 		case homeConfirmDecrypt:
 			return m.updateConfirmDecrypt(msg)
 		case homePostEncrypt:
@@ -300,6 +327,9 @@ func (m *Home) typing() bool {
 	if m.screen == homeSecret || m.screen == home2FA {
 		return true
 	}
+	if m.screen == homeThemePicker && m.themeFilter != "" {
+		return true
+	}
 	return m.screen == homePicker && m.picker != nil && m.picker.filtering
 }
 
@@ -307,7 +337,7 @@ func (m *Home) canSwitchTab(msg tea.KeyMsg) bool {
 	if m.typing() {
 		return false
 	}
-	if m.screen == homeConfirmDecrypt || m.screen == homePostEncrypt {
+	if m.screen == homeConfirmDecrypt || m.screen == homePostEncrypt || m.screen == homeThemePicker || m.screen == homeThemeConfirm {
 		return false
 	}
 	switch msg.Type {
@@ -354,6 +384,7 @@ func (m *Home) activateTab() {
 		m.picker = nil
 	case tabSettings:
 		m.reloadSettings()
+		m.applyTheme(m.settings.Theme)
 		m.setCursor = 0
 		m.screen = homeSettings
 		m.picker = nil
@@ -372,25 +403,37 @@ func (m *Home) returnToTab() {
 	m.decryptDst = ""
 	m.defaultSavedNotice = false
 	m.postLocked, m.postOriginal, m.postRecovery = "", "", ""
+	m.themeFilter, m.themePending = "", ""
 	m.activateTab()
 }
 
-// updateSettings: ↑/↓ move the cursor, backspace toggles the current option,
-// a applies. Tab/←/→ are handled by canSwitchTab so they leave for Help/etc.
+// updateSettings: ↑/↓ move the cursor, backspace toggles key type / auth,
+// Enter on Theme opens the theme picker, A applies. Tab/←/→ leave for Help.
 func (m *Home) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	const n = 2
+	const n = 3
 	switch msg.String() {
 	case "up", "k":
 		m.setCursor = (m.setCursor - 1 + n) % n
 	case "down", "j":
 		m.setCursor = (m.setCursor + 1) % n
-	case "backspace", " ", "enter":
+	case "enter":
+		if m.setCursor == 2 {
+			m.openThemePicker()
+			return m, nil
+		}
+		m.toggleSetting(m.setCursor)
+	case "backspace", " ":
+		if m.setCursor == 2 {
+			m.openThemePicker()
+			return m, nil
+		}
 		m.toggleSetting(m.setCursor)
 	case "a":
 		if err := m.deps.Settings.Save(m.settings); err != nil {
 			m.setResult("", err)
 			return m, nil
 		}
+		m.applyTheme(m.settings.Theme)
 		m.returnToTab()
 	case "q":
 		return m, tea.Quit
@@ -399,7 +442,8 @@ func (m *Home) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Home) toggleSetting(i int) {
-	if i == 0 {
+	switch i {
+	case 0:
 		modes := []keystore.Mode{keystore.ModePassword, keystore.ModePIN, keystore.ModePassword2FA, keystore.ModePIN2FA}
 		cur := 0
 		for j, mm := range modes {
@@ -408,9 +452,153 @@ func (m *Home) toggleSetting(i int) {
 			}
 		}
 		m.settings.KeyType = modes[(cur+1)%len(modes)]
-	} else {
+	case 1:
 		m.settings.AuthEncrypt = !m.settings.AuthEncrypt
 	}
+}
+
+func (m *Home) openThemePicker() {
+	m.themeBefore = NormalizeTheme(m.settings.Theme)
+	m.themeFilter = ""
+	m.themePending = ""
+	m.themeCursor = 0
+	for i, id := range themeNames {
+		if id == m.themeBefore {
+			m.themeCursor = i
+			break
+		}
+	}
+	m.applyTheme(m.themeBefore)
+	m.screen = homeThemePicker
+}
+
+func (m *Home) cancelThemePicker() {
+	m.themeFilter = ""
+	m.themePending = ""
+	m.applyTheme(m.themeBefore)
+	m.screen = homeSettings
+}
+
+func (m *Home) filteredThemes() []string {
+	q := strings.ToLower(strings.TrimSpace(m.themeFilter))
+	if q == "" {
+		return themeNames
+	}
+	out := make([]string, 0, 32)
+	for _, id := range themeNames {
+		name := strings.ToLower(themeDisplayName(id))
+		if strings.Contains(name, q) || strings.Contains(strings.ToLower(id), q) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (m *Home) clampThemeCursor() {
+	n := len(m.filteredThemes())
+	if n == 0 {
+		m.themeCursor = 0
+		return
+	}
+	if m.themeCursor < 0 {
+		m.themeCursor = 0
+	}
+	if m.themeCursor >= n {
+		m.themeCursor = n - 1
+	}
+}
+
+func (m *Home) previewThemeAtCursor() {
+	ids := m.filteredThemes()
+	if len(ids) == 0 {
+		m.applyTheme(m.themeBefore)
+		return
+	}
+	m.clampThemeCursor()
+	m.applyTheme(ids[m.themeCursor])
+}
+
+func (m *Home) updateThemePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		if m.themeFilter != "" {
+			m.themeFilter = ""
+			m.clampThemeCursor()
+			m.previewThemeAtCursor()
+			return m, nil
+		}
+		m.cancelThemePicker()
+		return m, nil
+	case "enter":
+		ids := m.filteredThemes()
+		if len(ids) == 0 {
+			return m, nil
+		}
+		m.clampThemeCursor()
+		m.themePending = ids[m.themeCursor]
+		m.applyTheme(m.themePending)
+		m.screen = homeThemeConfirm
+		return m, nil
+	case "up", "k":
+		if m.themeCursor > 0 {
+			m.themeCursor--
+			m.previewThemeAtCursor()
+		}
+		return m, nil
+	case "down", "j":
+		if m.themeCursor+1 < len(m.filteredThemes()) {
+			m.themeCursor++
+			m.previewThemeAtCursor()
+		}
+		return m, nil
+	case "backspace":
+		if m.themeFilter != "" {
+			r := []rune(m.themeFilter)
+			m.themeFilter = string(r[:len(r)-1])
+			m.themeCursor = 0
+			m.previewThemeAtCursor()
+		}
+		return m, nil
+	case "q":
+		if m.themeFilter == "" {
+			return m, tea.Quit
+		}
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		m.themeFilter += string(msg.Runes)
+		m.themeCursor = 0
+		m.previewThemeAtCursor()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Home) updateThemeConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "a", "enter", "y":
+		if m.themePending == "" {
+			m.screen = homeThemePicker
+			return m, nil
+		}
+		m.settings.Theme = NormalizeTheme(m.themePending)
+		if err := m.deps.Settings.Save(m.settings); err != nil {
+			m.setResult("", err)
+			return m, nil
+		}
+		m.applyTheme(m.settings.Theme)
+		m.themePending = ""
+		m.themeFilter = ""
+		m.screen = homeSettings
+		return m, nil
+	case "esc", "n":
+		m.themePending = ""
+		m.previewThemeAtCursor()
+		m.screen = homeThemePicker
+		return m, nil
+	case "q":
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 func (m *Home) openPicker(action, title string) {
@@ -459,7 +647,7 @@ func (m *Home) startSecret(mode keystore.Mode, action string) {
 	if action == "decrypt" {
 		file = m.pendingPath
 	}
-	m.prompt = newSecretPrompt(m.deps, mode, action, file)
+	m.prompt = newSecretPrompt(m.deps, m.th, mode, action, file)
 	m.screen = homeSecret
 }
 
@@ -548,7 +736,7 @@ func (m *Home) startEncryptWithSecret(mode keystore.Mode, secret string) {
 			m.setResult("", errors.New("cannot generate 2FA seed"))
 			return
 		}
-		m.twofa = newTwofaPrompt(m.deps, seed, uri)
+		m.twofa = newTwofaPrompt(m.deps, m.th, seed, uri)
 		m.screen = home2FA
 		return
 	}
@@ -662,8 +850,8 @@ func (m *Home) statusView() string {
 			device = "present"
 		}
 	}
-	return fmt.Sprintf("default key type: %s\nrequire auth to encrypt: %t\nshared 2fa: %s\ndevice secret: %s\nsettings: %s\nversion: %s",
-		keyType, m.settings.AuthEncrypt, shared2FA, device, m.deps.Settings.Path(), m.deps.Version)
+	return fmt.Sprintf("default key type: %s\nrequire auth to encrypt: %t\ntheme: %s\nshared 2fa: %s\ndevice secret: %s\nsettings: %s\nversion: %s",
+		keyType, m.settings.AuthEncrypt, themeDisplayName(m.settings.Theme), shared2FA, device, m.deps.Settings.Path(), m.deps.Version)
 }
 
 // chromeLines is the fixed vertical cost of header + tabs + footer around the box.
@@ -815,6 +1003,7 @@ func (m *Home) contentBody(innerH int) string {
 		for i, line := range []string{
 			"Default for new files: " + keyType,
 			"Require authentication to encrypt: " + auth,
+			"Theme: " + themeDisplayName(m.settings.Theme),
 		} {
 			if i == m.setCursor {
 				b.WriteString("> " + m.th.selected.Render(line) + "\n")
@@ -827,7 +1016,17 @@ func (m *Home) contentBody(innerH int) string {
 		if note := m.settings.KeyType.Shared2FANote(); note != "" {
 			b.WriteString(m.th.dim.Render(note) + "\n")
 		}
-		b.WriteString("\n" + renderKeys(m.th, "{↑}/{↓} move • {Backspace} toggle • {A} apply • {Tab} next section"))
+		b.WriteString(m.th.dim.Render("Theme: press Enter to open the theme picker.") + "\n")
+		b.WriteString("\n" + renderKeys(m.th, "{↑}/{↓} move • {Backspace} toggle • {Enter} theme picker • {A} apply • {Tab} next section"))
+		return b.String()
+	case homeThemePicker:
+		return m.themePickerView(innerH)
+	case homeThemeConfirm:
+		name := themeDisplayName(m.themePending)
+		var b strings.Builder
+		fmt.Fprintf(&b, "Apply %s?\n\n", name)
+		b.WriteString(m.th.dim.Render("This screen already shows the colours.") + "\n\n")
+		b.WriteString(renderKeys(m.th, "{A} apply • {Esc} cancel"))
 		return b.String()
 	case homeStatus:
 		return "Status\n\n" + m.statusText
@@ -849,6 +1048,47 @@ func (m *Home) contentBody(innerH int) string {
 		return m.th.ok.Render(m.result)
 	}
 	return ""
+}
+
+func (m *Home) themePickerView(innerH int) string {
+	ids := m.filteredThemes()
+	m.clampThemeCursor()
+	var b strings.Builder
+	b.WriteString("Choose a theme\n")
+	if m.themeFilter == "" {
+		b.WriteString(m.th.dim.Render("Type to filter by name. Enter selects.") + "\n")
+	} else {
+		fmt.Fprintf(&b, "Filter: %s\n", m.themeFilter)
+	}
+	fmt.Fprintf(&b, "%d themes\n\n", len(ids))
+	if len(ids) == 0 {
+		b.WriteString(m.th.dim.Render("No themes match.") + "\n\n")
+		b.WriteString(renderKeys(m.th, "{Backspace} edit filter • {Esc} clear or cancel"))
+		return b.String()
+	}
+	// Leave room for the header and footer lines inside the box.
+	listH := innerH - 6
+	if listH < 3 {
+		listH = 3
+	}
+	start := 0
+	if m.themeCursor >= listH {
+		start = m.themeCursor - listH + 1
+	}
+	end := start + listH
+	if end > len(ids) {
+		end = len(ids)
+	}
+	for i := start; i < end; i++ {
+		line := themeDisplayName(ids[i])
+		if i == m.themeCursor {
+			b.WriteString("> " + m.th.selected.Render(line) + "\n")
+		} else {
+			b.WriteString("  " + line + "\n")
+		}
+	}
+	b.WriteString("\n" + renderKeys(m.th, "{↑} {↓} move • type to filter • {Enter} select • {Esc} cancel"))
+	return b.String()
 }
 
 func (m *Home) postEncryptView() string {
@@ -886,8 +1126,7 @@ type secretPrompt struct {
 	errMsg string
 }
 
-func newSecretPrompt(d *Deps, mode keystore.Mode, action, file string) *secretPrompt {
-	th := newTheme(os.Stdout)
+func newSecretPrompt(d *Deps, th theme, mode keystore.Mode, action, file string) *secretPrompt {
 	pw := textinput.New()
 	pw.EchoMode = textinput.EchoPassword
 	if mode.HasDeviceSecret() {
@@ -1005,8 +1244,7 @@ type twofaPrompt struct {
 	errMsg string
 }
 
-func newTwofaPrompt(d *Deps, seed []byte, uri string) *twofaPrompt {
-	th := newTheme(os.Stdout)
+func newTwofaPrompt(d *Deps, th theme, seed []byte, uri string) *twofaPrompt {
 	code := textinput.New()
 	code.Placeholder = "6-digit code"
 	code.Focus()

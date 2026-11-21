@@ -10,10 +10,13 @@ import (
 // <config>/pillarbox/settings.json, mode 0600. KeyType is the key type used
 // for new files; empty means not configured yet, and the encrypt flow asks.
 // AuthEncrypt requires the secret before the encrypt file picker; it defaults
-// to false. Unlike the per-file keystores, settings hold no secret material.
+// to false. Theme is the TUI colour theme id (default, dracula, catppuccin,
+// jade); empty means default. Unlike the per-file keystores, settings hold no
+// secret material.
 type Settings struct {
-	KeyType     Mode `json:"key_type"`
-	AuthEncrypt bool `json:"auth_encrypt"`
+	KeyType     Mode   `json:"key_type"`
+	AuthEncrypt bool   `json:"auth_encrypt"`
+	Theme       string `json:"theme,omitempty"`
 }
 
 // SettingsStore owns the settings file. Saves are atomic: temp file in the

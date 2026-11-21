@@ -18,10 +18,6 @@ const (
 	minTermHeight = 40
 )
 
-// Magenta accent (ANSI 201). Avoid truecolor here: shorter sequences and
-// fewer surprises when a view is width-capped.
-const accentColor = lipgloss.Color("201")
-
 // newRenderer is a var so tests can observe color handling. termenv honours
 // NO_COLOR when the renderer is built, so styles degrade to plain text.
 var newRenderer = func(w io.Writer) *lipgloss.Renderer {
@@ -29,6 +25,7 @@ var newRenderer = func(w io.Writer) *lipgloss.Renderer {
 }
 
 type theme struct {
+	name      string
 	title     lipgloss.Style
 	dim       lipgloss.Style
 	key       lipgloss.Style // dim colour, bold — shortcut glyphs in footers
@@ -41,22 +38,26 @@ type theme struct {
 	box       lipgloss.Style
 }
 
-func newTheme(w io.Writer) theme {
+func newTheme(w io.Writer, name string) theme {
 	r := newRenderer(w)
-	dimColor := lipgloss.Color("8")
+	id := NormalizeTheme(name)
+	p := paletteFor(id)
+	dimColor := lipgloss.Color(p.dim)
+	accent := lipgloss.Color(p.accent)
 	return theme{
-		title:     r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
+		name:      id,
+		title:     r.NewStyle().Bold(true).Foreground(lipgloss.Color(p.title)),
 		dim:       r.NewStyle().Foreground(dimColor),
 		key:       r.NewStyle().Bold(true).Foreground(dimColor),
-		selected:  r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
-		errS:      r.NewStyle().Foreground(lipgloss.Color("9")),
-		ok:        r.NewStyle().Foreground(lipgloss.Color("10")),
-		tab:       r.NewStyle().Foreground(lipgloss.Color("15")),
-		tabActive: r.NewStyle().Bold(true).Foreground(accentColor),
-		accent:    r.NewStyle().Foreground(accentColor),
+		selected:  r.NewStyle().Bold(true).Foreground(lipgloss.Color(p.selected)),
+		errS:      r.NewStyle().Foreground(lipgloss.Color(p.err)),
+		ok:        r.NewStyle().Foreground(lipgloss.Color(p.ok)),
+		tab:       r.NewStyle().Foreground(lipgloss.Color(p.tab)),
+		tabActive: r.NewStyle().Bold(true).Foreground(accent),
+		accent:    r.NewStyle().Foreground(accent),
 		box: r.NewStyle().
 			Border(lipgloss.NormalBorder()).
-			BorderForeground(accentColor).
+			BorderForeground(accent).
 			Padding(0, 1),
 	}
 }

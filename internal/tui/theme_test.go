@@ -27,7 +27,7 @@ func TestFitDoesNotSplitANSISequences(t *testing.T) {
 }
 
 func TestRenderKeysBoldsShortcuts(t *testing.T) {
-	th := newTheme(nil)
+	th := newTheme(nil, ThemeDefault)
 	out := renderKeys(th, "{Q} to quit")
 	if !strings.Contains(out, "Q") || !strings.Contains(out, "to quit") {
 		t.Fatalf("renderKeys = %q", out)

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-21
+
 ### Added
 
 - Shared install-wide TOTP seed (`totp.seed`): one QR for all 2FA files on this machine.
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI encrypt requires acknowledging the recovery key, then keep or remove the original.
 - Help FAQ: Settings vs per-file mode, shared 2FA, PIN device secret, recovery keys.
 - Status shows shared 2FA and device secret presence.
+- TUI Themes setting with Default plus a large built-in colour catalog. Type to filter by name, Enter to select, then A to apply or Esc to cancel. `config set theme NAME`.
 
 ### Changed
 

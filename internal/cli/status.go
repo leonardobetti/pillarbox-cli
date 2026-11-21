@@ -37,7 +37,11 @@ func (d *Deps) runStatus() error {
 			device = "present"
 		}
 	}
-	d.printf("default key type: %s\nrequire auth to encrypt: %t\nshared 2fa: %s\ndevice secret: %s\nsettings: %s\nversion: %s\n",
-		keyType, st.AuthEncrypt, shared2FA, device, d.Settings.Path(), Version)
+	theme := st.Theme
+	if theme == "" {
+		theme = "default"
+	}
+	d.printf("default key type: %s\nrequire auth to encrypt: %t\ntheme: %s\nshared 2fa: %s\ndevice secret: %s\nsettings: %s\nversion: %s\n",
+		keyType, st.AuthEncrypt, theme, shared2FA, device, d.Settings.Path(), Version)
 	return nil
 }

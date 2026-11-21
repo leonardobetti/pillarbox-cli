@@ -53,6 +53,21 @@ A 6-digit PIN has 1,000,000 values. At 0.5 seconds per Argon2id guess, a single 
 
 A TOTP code, RFC 6238, expires every 30 seconds, so it cannot feed key derivation. Pillarbox checks the code after your secret unwraps the TOTP seed. An attacker who has the file key material and your secret, and who replaces the binary, can skip that check. The 2FA modes raise the cost of a stolen secret when people use the stock binary. They do not add key strength.
 
+## Theme
+
+Settings includes Theme. Enter opens the theme list. Type to filter by name, then Enter on a theme. Pillarbox asks you to confirm with A, or Esc to cancel. `pillarbox config set theme NAME` sets the same value from the CLI.
+
+## Changelog
+
+### 0.4.0
+
+- Shared 2FA seed for the install, one QR on first 2FA encrypt.
+- Themes in Settings with type-to-filter and apply confirm.
+- Clearer encrypt and decrypt flow: recovery key ack, keep or remove original, overwrite confirm.
+- Help FAQ for Settings vs per-file keys, PIN device secret, and recovery keys.
+
+Full history: [CHANGELOG.md](CHANGELOG.md).
+
 ## Decrypt with stock age
 
 The recovery key is an `age` secret key. With it, stock `age` decrypts Pillarbox output without Pillarbox.
@@ -80,10 +95,11 @@ Every screen shows shortcuts in the footer. Tab or left and right arrows switch 
 | `pillarbox` | Open the home menu on a TTY. Without a TTY, print help, or exit 5 if settings are missing. |
 | `pillarbox lock <path> [-o OUT] [--remove-original] [--force]` | Encrypt a file |
 | `pillarbox unlock <file.pbx> [-o OUT] [--force]` | Decrypt a `.pbx` file |
-| `pillarbox status` | Show default key type, auth-encrypt, shared 2FA, device secret, settings path, and version |
+| `pillarbox status` | Show default key type, auth-encrypt, theme, shared 2FA, device secret, settings path, and version |
 | `pillarbox export-key <file.pbx>` | Print the recovery key of one file after authentication |
 | `pillarbox config set auth-encrypt true\|false` | Require the secret before the encrypt file picker. Default is false. |
 | `pillarbox config set key-type MODE` | Set the default key type used for new files |
+| `pillarbox config set theme NAME` | Set the TUI theme. Use a name from Settings, Theme. |
 | `pillarbox version` | Print the version |
 
 Global flags: `--no-tui`, `--secret-stdin`, `--totp CODE`, `--quiet`. No command accepts a secret as an argument.
