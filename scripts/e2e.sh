@@ -12,7 +12,6 @@ trap 'rm -rf "$WORK"' EXIT
 
 BIN="$WORK/pillarbox"
 TOTPCODE="$WORK/totpcode"
-MKKS="$WORK/mkkeystore"
 
 # Fixed RFC 6238 test seed (base32 of "12345678901234567890"). Only used with
 # the PILLARBOX_E2E_TOTP_SEED test hook so the script can compute a valid code.
@@ -53,10 +52,9 @@ pb_stdin() {
   ( printf '%s\n' "$secret" | pb_env "$run" "$BIN" --no-tui --secret-stdin "$@" )
 }
 
-say "building pillarbox, totpcode and mkkeystore"
+say "building pillarbox and totpcode"
 ( cd "$ROOT" && CGO_ENABLED=0 go build -o "$BIN" ./cmd/pillarbox )
 ( cd "$ROOT" && CGO_ENABLED=0 go build -o "$TOTPCODE" ./scripts/totpcode )
-( cd "$ROOT" && CGO_ENABLED=0 go build -o "$MKKS" ./scripts/mkkeystore )
 
 # Shared fixture.
 FIX="$WORK/fixtures"
@@ -99,17 +97,14 @@ run_mode() {
   extra=""
   if [ "$(mode_has2fa "$MODE")" = yes ]; then
     extra="--totp $("$TOTPCODE" "$TOTP_SEED" 0)"
+    # Lock creates a fresh per-file TOTP seed; pin it to the fixed test seed
+    # so the --totp codes computed from $TOTP_SEED stay valid.
+    export PILLARBOX_E2E_TOTP_SEED="$TOTP_SEED"
   fi
 
-  # The CLI has no init command anymore; the mkkeystore helper seeds the
-  # keystore non-interactively for the e2e run.
-  say "mode $MODE: create keystore"
-  if [ "$(mode_has2fa "$MODE")" = yes ]; then
-    ( printf '%s\n' "$secret" | pb_env "$run" env PILLARBOX_E2E_TOTP_SEED="$TOTP_SEED" \
-      "$MKKS" --mode "$MODE" ) >/dev/null
-  else
-    ( printf '%s\n' "$secret" | pb_env "$run" "$MKKS" --mode "$MODE" ) >/dev/null
-  fi
+  # Each file gets its own key; the key type comes from settings.
+  say "mode $MODE: config set key-type"
+  pb_env "$run" "$BIN" config set key-type "$MODE" >/dev/null
 
   say "mode $MODE: lock and unlock a file"
   cp "$FIX/file.txt" "$run/data/file.txt"
@@ -143,6 +138,7 @@ run_mode() {
 
   say "mode $MODE: tampered file exits 4"
   cp "$run/data/file.txt.pbx" "$run/data/tampered.pbx"
+  cp "$run/data/file.txt.pbx.key" "$run/data/tampered.pbx.key"
   local f="$run/data/tampered.pbx" off=100 byte new
   byte="$(od -An -tu1 -j "$off" -N 1 "$f" | tr -d ' ')"
   new=$(( (byte + 1) % 256 ))
@@ -161,6 +157,7 @@ run_mode() {
 
 for m in password pin password+2fa pin+2fa; do
   run_mode "$m"
+  unset PILLARBOX_E2E_TOTP_SEED
 done
 
 say "all modes passed"

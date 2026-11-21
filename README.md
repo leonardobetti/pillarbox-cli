@@ -27,8 +27,8 @@ The install script verifies the archive against `checksums.txt` from the release
 Run this on a clean machine. It takes under a minute.
 
 1. Run `pillarbox`. Pillarbox guides you through five screens: what it does, the unlock mode, your secret, 2FA setup if you chose a 2FA mode, and your recovery key. Save the recovery key. Pillarbox shows it once.
-2. Encrypt a file: `pillarbox lock .env` creates `.env.pbx`.
-3. Decrypt it back: `pillarbox unlock .env.pbx`.
+2. Encrypt a file: `pillarbox lock .env` creates `.env.pbx` and `.env.pbx.key`. Each file gets its own key; the key type comes from Settings, and you type the secret each time.
+3. Decrypt it back: `pillarbox unlock .env.pbx` reads `.env.pbx.key` and asks for the secret.
 
 For scripts, skip the screens and pipe the secret:
 
@@ -38,7 +38,7 @@ printf '%s\n' "$MY_SECRET" | pillarbox --no-tui --secret-stdin lock .env
 
 ## Unlock modes
 
-The onboarding menu picks one of four unlock modes. The secret screen states the rules for the chosen mode, and why they exist, before you type anything:
+Onboarding picks one of four key types and stores it in Settings. Every encrypted file gets its own key, stored next to it as `<file>.pbx.key`. The secret screen states the rules for the chosen mode, and why they exist, before you type anything:
 
 | Mode | Secret | Device secret in the key | TOTP check |
 | --- | --- | --- | --- |
@@ -82,9 +82,10 @@ Every screen shows its keys in the footer. In the menus: up/down arrows or Tab t
 | `pillarbox` | Onboarding when there is no keystore, home menu otherwise |
 | `pillarbox lock <path> [-o OUT] [--remove-original] [--force]` | Encrypt a file |
 | `pillarbox unlock <file.pbx> [-o OUT] [--force]` | Decrypt a `.pbx` file |
-| `pillarbox status` | Show mode, 2FA state, keystore path and version |
-| `pillarbox export-key` | Print the recovery key after authentication |
-| `pillarbox config set gate-encrypt true\|false` | Require authentication before `lock` |
+| `pillarbox status` | Show key type, gate-encrypt, settings path and version |
+| `pillarbox export-key <file.pbx>` | Print the recovery key of one file after authentication |
+| `pillarbox config set gate-encrypt true\|false` | Toggle the gate-encrypt setting |
+| `pillarbox config set key-type MODE` | Set the key type used for new files |
 | `pillarbox version` | Print the version |
 
 Global flags: `--no-tui`, `--secret-stdin`, `--totp CODE`, `--quiet`. No command accepts a secret as an argument.

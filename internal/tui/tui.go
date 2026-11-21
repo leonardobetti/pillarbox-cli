@@ -11,7 +11,7 @@ import (
 // Deps wires the core services into the TUI, mirroring cli.Deps. Tests inject
 // the real implementations rooted in temp dirs, or fakes for TOTP.
 type Deps struct {
-	Store    keystore.Store
+	Settings keystore.SettingsStore
 	Wrapper  keystore.Wrapper
 	KDF      auth.KDF
 	TOTP     auth.TOTP

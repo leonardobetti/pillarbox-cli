@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Unified key map shown in every footer: arrows or Tab navigate, Backspace flips the settings switch, A applies, Esc goes back, Q quits. The home settings toggle no longer uses a form widget.
+- Encryption moved from one global keystore to per-file keys. Every `lock` creates a fresh age identity for the file, wraps it under a key derived from your secret, and stores it as `<file>.pbx.key` next to the `.pbx`. `unlock` and `export-key` work per file. Settings (`settings.json`) hold the key type and the gate-encrypt toggle; when the key type is unset, the encrypt flow asks before encrypting. The Settings screen is a stable option list: Tab/Backspace move down, arrows flip the current option, A applies, and states persist between sessions.
 
 ### Removed
 

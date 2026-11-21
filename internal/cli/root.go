@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/atotto/clipboard"
 	"github.com/spf13/cobra"
 
@@ -19,7 +20,7 @@ import (
 // Deps wires the core services into the CLI. Production uses DefaultDeps;
 // tests inject real implementations rooted in temp dirs or fakes.
 type Deps struct {
-	Store    keystore.Store
+	Settings keystore.SettingsStore
 	Wrapper  keystore.Wrapper
 	KDF      auth.KDF
 	TOTP     auth.TOTP
@@ -62,7 +63,7 @@ func Execute() int {
 
 // DefaultDeps builds Deps from the real implementations and process stdio.
 func DefaultDeps() (*Deps, error) {
-	store, err := keystore.DefaultStore()
+	settings, err := keystore.DefaultSettingsStore()
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +72,7 @@ func DefaultDeps() (*Deps, error) {
 		return nil, err
 	}
 	return &Deps{
-		Store:    store,
+		Settings: settings,
 		Wrapper:  keystore.NewWrapper(),
 		KDF:      auth.NewKDF(),
 		TOTP:     auth.NewTOTP(),
@@ -153,14 +154,14 @@ func newRoot(d *Deps) *cobra.Command {
 // --no-tui it runs onboarding when the keystore is missing and the home menu
 // otherwise; non-interactive it exits 5 or prints help.
 func (d *Deps) runRoot(cmd *cobra.Command) error {
-	exists, err := d.Store.Exists()
+	exists, err := d.Settings.Exists()
 	if err == nil && !exists && d.interactive() {
 		if _, terr := tui.RunOnboarding(d.tuiDeps()); terr == nil {
-			exists, _ = d.Store.Exists()
+			exists, _ = d.Settings.Exists()
 		}
 	}
 	if err == nil && !exists {
-		return &exitError{ExitKeystore, "no keystore; run pillarbox to set up"}
+		return &exitError{ExitKeystore, "no settings; run pillarbox to set up"}
 	}
 	if d.interactive() {
 		if _, terr := tui.RunHome(d.tuiDeps()); terr != nil {
@@ -179,7 +180,7 @@ func (d *Deps) interactive() bool {
 
 func (d *Deps) tuiDeps() *tui.Deps {
 	return &tui.Deps{
-		Store:    d.Store,
+		Settings: d.Settings,
 		Wrapper:  d.Wrapper,
 		KDF:      d.KDF,
 		TOTP:     d.TOTP,
@@ -217,21 +218,106 @@ func exactArgs(n int, usage string) cobra.PositionalArgs {
 	}
 }
 
-// loadKeystore loads the keystore and maps missing or invalid to exit 5, PRD
-// 8.1 and 9. On a terminal it starts onboarding first when the keystore is
-// missing, PRD 8.1.
-func (d *Deps) loadKeystore() (*keystore.Keystore, error) {
-	ks, err := d.Store.Load()
-	if (errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid)) && d.interactive() {
+// loadSettings loads the settings file. A missing file is empty settings, an
+// invalid one is exit 5. On a terminal, missing settings start onboarding.
+func (d *Deps) loadSettings() (*keystore.Settings, error) {
+	st, err := d.Settings.Load()
+	if errors.Is(err, keystore.ErrInvalid) && d.interactive() {
 		if _, terr := tui.RunOnboarding(d.tuiDeps()); terr == nil {
-			ks, err = d.Store.Load()
+			st, err = d.Settings.Load()
 		}
 	}
-	if errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid) {
-		return nil, &exitError{ExitKeystore, "keystore missing or invalid; run pillarbox to set up"}
+	if errors.Is(err, keystore.ErrInvalid) {
+		return nil, &exitError{ExitKeystore, "settings invalid; run pillarbox to set up"}
 	}
 	if err != nil {
-		return nil, &exitError{ExitOther, "cannot read keystore"}
+		return nil, &exitError{ExitOther, "cannot read settings"}
+	}
+	return st, nil
+}
+
+// keyType resolves the key type for a new file: the configured one from
+// Settings, or exit 5 when unset. The interactive chooser lives in the TUI.
+func (d *Deps) keyType() (keystore.Mode, error) {
+	st, err := d.loadSettings()
+	if err != nil {
+		return "", err
+	}
+	if !st.KeyType.Valid() {
+		return "", &exitError{ExitKeystore, "no key type configured; run pillarbox and set it in Settings"}
+	}
+	return st.KeyType, nil
+}
+
+// buildFileKey creates the per-file keystore for dst: secret from the user,
+// device secret for PIN modes, TOTP seed for 2FA modes, and a fresh age
+// identity wrapped under the KEK. The keystore is saved atomically at
+// dst + ".key", mode 0600. It returns the keystore and the raw recovery key.
+func (d *Deps) buildFileKey(mode keystore.Mode, dst string) (*keystore.Keystore, string, error) {
+	secret, err := d.readSecret(false)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := auth.ValidateSecret(mode, secret); err != nil {
+		return nil, "", &exitError{ExitUsage, "invalid secret: " + err.Error()}
+	}
+	var devSecret []byte
+	if mode.HasDeviceSecret() {
+		devSecret, _, err = d.DevStore.LoadOrCreate()
+		if err != nil {
+			return nil, "", &exitError{ExitOther, "cannot write device secret"}
+		}
+	}
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		return nil, "", &exitError{ExitOther, "cannot generate identity"}
+	}
+	var seed []byte
+	if mode.Has2FA() {
+		var uri string
+		// PILLARBOX_E2E_TOTP_SEED is a test hook used only by scripts/e2e.sh;
+		// it is unset in production and still requires a valid code.
+		if s := os.Getenv("PILLARBOX_E2E_TOTP_SEED"); s != "" {
+			seed, uri, err = auth.GenerateSeedFromBase32(s)
+		} else {
+			seed, uri, err = d.TOTP.GenerateSeed()
+		}
+		if err != nil {
+			return nil, "", &exitError{ExitOther, "cannot generate TOTP seed"}
+		}
+		if d.interactive() {
+			d.println("2FA URI: " + uri)
+		}
+		code, err := d.readTOTP()
+		if err != nil {
+			return nil, "", err
+		}
+		ok, _, verr := d.TOTP.Verify(seed, code, -1)
+		if verr != nil || !ok {
+			return nil, "", &exitError{ExitAuth, "authentication failed; check the secret and the 2FA code"}
+		}
+	}
+	ks, err := auth.NewInitializer(d.KDF, d.Wrapper).Initialize(
+		mode, identity.Recipient().String(), []byte(identity.String()), secret, devSecret, seed, keystore.DefaultArgon2Params)
+	if err != nil {
+		return nil, "", &exitError{ExitOther, "cannot build file key"}
+	}
+	store := keystore.NewStore(dst + ".key")
+	if err := store.Save(ks); err != nil {
+		return nil, "", &exitError{ExitOther, "cannot write file key"}
+	}
+	return ks, identity.String(), nil
+}
+
+// loadFileKey loads the per-file keystore sidecar for a .pbx file. Missing or
+// invalid sidecar is exit 5.
+func (d *Deps) loadFileKey(src string) (*keystore.Keystore, error) {
+	ks, err := keystore.NewStore(src + ".key").Load()
+	if errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid) {
+		return nil, &exitError{ExitKeystore, "no key for this file or key file invalid"}
+	}
+	if err != nil {
+		return nil, &exitError{ExitOther, "cannot read file key"}
 	}
 	return ks, nil
 }

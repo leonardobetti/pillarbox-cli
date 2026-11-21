@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"os"
+	"strings"
+
 	"filippo.io/age"
 	"github.com/spf13/cobra"
 
+	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
 	"github.com/leonardobetti/pillarbox-cli/internal/vault"
 )
 
@@ -42,36 +46,46 @@ func newUnlockCmd(d *Deps) *cobra.Command {
 	return c
 }
 
-// runLock implements PRD 7.3: authenticate first when gate-encrypt is on,
-// then stream through vault.Lock.
+// runLock encrypts a single file with its own fresh key. The key type comes
+// from Settings (asked in the TUI when unset), the secret unwraps the per-file
+// key, and the wrapped key is stored next to the output as <file>.pbx.key.
 func (d *Deps) runLock(path, out string, removeOriginal, force bool) error {
-	ks, err := d.loadKeystore()
+	mode, err := d.keyType()
 	if err != nil {
 		return err
 	}
-	if ks.Policy.GateEncrypt {
-		if _, _, err := d.authenticate(ks); err != nil {
-			return err
-		}
+	dst := out
+	if dst == "" {
+		dst = path + ".pbx"
 	}
-	dst, err := d.Vault.Lock(path, ks.Recipient, vault.LockOptions{
+	ks, recovery, err := d.buildFileKey(mode, dst)
+	if err != nil {
+		return err
+	}
+	locked, err := d.Vault.Lock(path, ks.Recipient, vault.LockOptions{
 		Out:            out,
 		RemoveOriginal: removeOriginal,
 		Force:          force,
 	})
 	if err != nil {
+		_ = os.Remove(dst + ".key")
 		return mapVaultErr(err)
 	}
 	if !d.opts.quiet {
-		d.println(dst)
+		d.println(locked)
+		d.printf("recovery key for this file (shown once): %s\n", recovery)
 	}
 	return nil
 }
 
-// runUnlock implements PRD 7.4: authenticate, persist the new TOTP step, then
-// stream through vault.Unlock.
+// runUnlock decrypts a .pbx file with its own key from the sidecar
+// <file>.pbx.key: authenticate against the sidecar, persist the new TOTP
+// step, then stream through vault.Unlock.
 func (d *Deps) runUnlock(src, out string, force bool) error {
-	ks, err := d.loadKeystore()
+	if !strings.HasSuffix(src, ".pbx") {
+		return &exitError{ExitUsage, "unlock accepts a .pbx file only"}
+	}
+	ks, err := d.loadFileKey(src)
 	if err != nil {
 		return err
 	}
@@ -81,7 +95,7 @@ func (d *Deps) runUnlock(src, out string, force bool) error {
 	}
 	if ks.Mode.Has2FA() {
 		ks.LastTOTPStep = &newStep
-		if err := d.Store.Save(ks); err != nil {
+		if err := keystore.NewStore(src + ".key").Save(ks); err != nil {
 			d.warn("warning: could not persist the TOTP step")
 		}
 	}

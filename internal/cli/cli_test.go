@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"filippo.io/age"
 	"github.com/spf13/pflag"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
@@ -30,7 +29,7 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		dir: dir,
 		deps: &Deps{
-			Store:    keystore.NewStore(filepath.Join(dir, "cfg", "keystore.json")),
+			Settings: keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
 			Wrapper:  keystore.NewWrapper(),
 			KDF:      auth.NewKDF(),
 			TOTP:     auth.NewTOTP(),
@@ -71,52 +70,38 @@ func (f *fakeTOTP) Verify(seed []byte, code string, lastStep int64) (bool, int64
 	return false, 0, nil
 }
 
-// seedKeystore writes a keystore for mode directly through the core services,
-// without going through a CLI command. The init command was removed; setup
-// happens through bare pillarbox.
-func seedKeystore(t *testing.T, e *env, mode keystore.Mode, secret string) {
+// seedSettings writes the settings file with the given key type.
+func seedSettings(t *testing.T, e *env, mode keystore.Mode) {
 	t.Helper()
-	if mode.Has2FA() {
-		e.deps.TOTP = &fakeTOTP{}
-	}
-	var devSecret []byte
-	if mode.HasDeviceSecret() {
-		d, _, err := e.deps.DevStore.LoadOrCreate()
-		if err != nil {
-			t.Fatalf("LoadOrCreate: %v", err)
-		}
-		devSecret = d
-	}
-	id, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatalf("GenerateX25519Identity: %v", err)
-	}
-	seed := bytes.Repeat([]byte{0x42}, 20)
-	ks, err := auth.NewInitializer(e.deps.KDF, e.deps.Wrapper).Initialize(
-		mode, id.Recipient().String(), []byte(id.String()), []byte(secret), devSecret, seed, keystore.DefaultArgon2Params)
-	if err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
-	if err := e.deps.Store.Save(ks); err != nil {
-		t.Fatalf("Save: %v", err)
+	if err := e.deps.Settings.Save(&keystore.Settings{KeyType: mode}); err != nil {
+		t.Fatalf("Save settings: %v", err)
 	}
 }
 
 func initPassword(t *testing.T, e *env) {
 	t.Helper()
-	seedKeystore(t, e, keystore.ModePassword, testSecret)
+	seedSettings(t, e, keystore.ModePassword)
 }
 
-// setupLocked seeds a keystore and locks a file, leaving e.src and e.pbx set.
+// setupLocked configures the key type and locks a file with its own key,
+// leaving e.src and e.pbx set.
 func (e *env) setupLocked(t *testing.T, mode, secret string) {
 	t.Helper()
-	seedKeystore(t, e, keystore.Mode(mode), secret)
+	m := keystore.Mode(mode)
+	seedSettings(t, e, m)
+	if m.Has2FA() {
+		e.deps.TOTP = &fakeTOTP{}
+	}
 	e.src = makeFile(t, e, "a.txt", "hello pillarbox")
-	code, out, errOut := e.run(t, "", "lock", e.src, "--no-tui")
+	args := []string{"lock", e.src, "--no-tui", "--secret-stdin"}
+	if m.Has2FA() {
+		args = append(args, "--totp", "123456")
+	}
+	code, out, errOut := e.run(t, secret+"\n", args...)
 	if code != ExitOK {
 		t.Fatalf("lock: exit %d, stderr %q", code, errOut)
 	}
-	e.pbx = strings.TrimSpace(out)
+	e.pbx = strings.TrimSpace(strings.Split(out, "\n")[0])
 }
 
 func makeFile(t *testing.T, e *env, name, content string) string {
@@ -146,10 +131,10 @@ func TestCommandsTable(t *testing.T) {
 			wantOut:  "pillarbox version",
 		},
 		{
-			name:     "status without keystore exits 5",
+			name:     "status without settings shows not set",
 			args:     func(t *testing.T, e *env) []string { return []string{"status"} },
-			wantExit: ExitKeystore,
-			wantErr:  "run pillarbox to set up",
+			wantExit: ExitOK,
+			wantOut:  "not set",
 		},
 		{
 			name:     "init is no longer a command",
@@ -158,10 +143,10 @@ func TestCommandsTable(t *testing.T) {
 			wantErr:  "unknown command",
 		},
 		{
-			name:     "lock without keystore exits 5",
+			name:     "lock without key type exits 5",
 			args:     func(t *testing.T, e *env) []string { return []string{"lock", "x", "--no-tui"} },
 			wantExit: ExitKeystore,
-			wantErr:  "run pillarbox to set up",
+			wantErr:  "no key type configured",
 		},
 		{
 			name:     "lock missing path exits 2",
@@ -175,12 +160,17 @@ func TestCommandsTable(t *testing.T) {
 				initPassword(t, e)
 				e.src = makeFile(t, e, "a.txt", "hello")
 			},
-			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui"} },
+			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui", "--secret-stdin"} },
+			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
 			wantOut:  ".pbx",
 			check: func(t *testing.T, e *env, out, errOut string) {
-				if _, err := os.Stat(strings.TrimSpace(out)); err != nil {
+				dst := strings.TrimSpace(strings.Split(out, "\n")[0])
+				if _, err := os.Stat(dst); err != nil {
 					t.Fatalf("no output file: %v", err)
+				}
+				if _, err := os.Stat(dst + ".key"); err != nil {
+					t.Fatalf("no per-file key sidecar: %v", err)
 				}
 			},
 		},
@@ -192,7 +182,10 @@ func TestCommandsTable(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			args:     func(t *testing.T, e *env) []string { return []string{"lock", filepath.Join(e.dir, "adir"), "--no-tui"} },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"lock", filepath.Join(e.dir, "adir"), "--no-tui", "--secret-stdin"}
+			},
+			stdin:    testSecret + "\n",
 			wantExit: ExitUsage,
 			wantErr:  "folders are not supported",
 		},
@@ -202,7 +195,10 @@ func TestCommandsTable(t *testing.T) {
 				initPassword(t, e)
 				e.src = makeFile(t, e, "a.txt", "hello")
 			},
-			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui", "--quiet"} },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"lock", e.src, "--no-tui", "--quiet", "--secret-stdin"}
+			},
+			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
 			check: func(t *testing.T, e *env, out, errOut string) {
 				if out != "" {
@@ -285,42 +281,54 @@ func TestCommandsTable(t *testing.T) {
 			wantErr:  "--secret-stdin",
 		},
 		{
-			name:  "unlock missing file exits 1",
+			name:  "unlock without sidecar key exits 5",
 			setup: func(t *testing.T, e *env) { initPassword(t, e) },
 			args: func(t *testing.T, e *env) []string {
 				return []string{"unlock", filepath.Join(e.dir, "none.pbx"), "--no-tui", "--secret-stdin"}
 			},
 			stdin:    testSecret + "\n",
-			wantExit: ExitOther,
+			wantExit: ExitKeystore,
+			wantErr:  "no key for this file",
 		},
 		{
-			name:     "status after init",
+			name:     "status after settings",
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
 			args:     func(t *testing.T, e *env) []string { return []string{"status"} },
 			wantExit: ExitOK,
-			wantOut:  "mode: password",
+			wantOut:  "key type: password",
 		},
 		{
-			name:     "export-key prints recovery key",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"export-key", "--no-tui", "--secret-stdin"} },
+			name:  "export-key prints recovery key",
+			setup: func(t *testing.T, e *env) { e.setupLocked(t, "password", testSecret) },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"export-key", e.pbx, "--no-tui", "--secret-stdin"}
+			},
 			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
 			wantOut:  "AGE-SECRET-KEY-1",
 		},
 		{
-			name:     "export-key wrong secret exits 3",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"export-key", "--no-tui", "--secret-stdin"} },
+			name:  "export-key wrong secret exits 3",
+			setup: func(t *testing.T, e *env) { e.setupLocked(t, "password", testSecret) },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"export-key", e.pbx, "--no-tui", "--secret-stdin"}
+			},
 			stdin:    "nope\n",
 			wantExit: ExitAuth,
+		},
+		{
+			name:     "config set key-type",
+			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
+			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "key-type", "pin+2fa"} },
+			wantExit: ExitOK,
+			wantOut:  "key-type set",
 		},
 		{
 			name:     "config set gate-encrypt true",
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
 			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "gate-encrypt", "true"} },
 			wantExit: ExitOK,
-			wantOut:  "gate-encrypt = true",
+			wantOut:  "gate-encrypt set",
 		},
 		{
 			name:     "config set bad value exits 2",
