@@ -28,6 +28,15 @@ const (
 	homeStatus
 	homeHelp
 	homeResult
+	homeConfirmDecrypt
+	homePostEncrypt
+)
+
+type postEncryptPhase int
+
+const (
+	postRecoveryAck postEncryptPhase = iota
+	postKeepOriginal
 )
 
 const (
@@ -45,6 +54,11 @@ const tagline = "Pillarbox encrypts and decrypts files from the terminal."
 const footerKeys = "{Tab}, {←} or {→} to navigate  {Enter} to select  {Q} to quit  {Backspace} to change"
 
 const helpIntro = "Pillarbox encrypts and decrypts files in the terminal. Your secret is stretched with Argon2id before the file is sealed with age. Free and open source, built by Leonardo Betti and Nasser Khalil with help from LLMs."
+
+const helpFAQ = `Settings set the default for NEW files only. Each .pbx stores its own mode and key.
+2FA: one QR for this install. Every 2FA file shares that authenticator entry.
+PIN files need this machine's device secret, or the recovery key.
+Each encrypt shows a recovery key once. Save it.`
 
 const helpText = "{Tab} / {←} / {→} switch tabs • {↑}/{↓} move in the box • {Enter} select • {Backspace} toggle setting or parent dir • {A} apply (settings) • {Q} quit • {Ctrl+C} abort"
 
@@ -65,7 +79,12 @@ type modeItem string
 
 func (m modeItem) FilterValue() string { return string(m) }
 func (m modeItem) Title() string       { return string(m) }
-func (m modeItem) Description() string { return "" }
+func (m modeItem) Description() string {
+	if keystore.Mode(m).Has2FA() {
+		return "One QR for all 2FA files on this install"
+	}
+	return ""
+}
 
 // Home is the home shell: horizontal tabs, a bordered content box, and a
 // keybinding footer. Every file is encrypted with its own key; the key type
@@ -91,6 +110,17 @@ type Home struct {
 	pendingMode   keystore.Mode
 	pendingSecret string
 
+	pendingIdentity *age.X25519Identity // decrypt after overwrite confirm
+	decryptDst      string
+
+	postPhase    postEncryptPhase
+	postLocked   string
+	postOriginal string
+	postMode     keystore.Mode
+	postRecovery string
+
+	defaultSavedNotice bool
+
 	setCursor int
 
 	statusText  string
@@ -107,8 +137,11 @@ func NewHome(d *Deps) *Home {
 		modeItem(keystore.ModePassword2FA),
 		modeItem(keystore.ModePIN2FA),
 	}
-	cl := list.New(modes, list.NewDefaultDelegate(), maxWidth, 6)
-	cl.Title = "Key type for this file"
+	delegate := list.NewDefaultDelegate()
+	delegate.SetHeight(2)
+	delegate.SetSpacing(0)
+	cl := list.New(modes, delegate, maxWidth, 10)
+	cl.Title = "Default key type for new files"
 	cl.SetShowHelp(false)
 	cl.SetShowStatusBar(false)
 	cl.SetShowPagination(false)
@@ -184,6 +217,10 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.String() == "q" && !m.typing() {
+			// Stay on the recovery-key screen until the user acknowledges it.
+			if m.screen == homePostEncrypt && m.postPhase == postRecoveryAck {
+				return m, nil
+			}
 			return m, tea.Quit
 		}
 		if m.tooSmall() {
@@ -198,6 +235,12 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Top-level tabs stay put; Q quits. Nested screens return to the tab.
 			switch m.screen {
 			case homePicker, homeStatus, homeHelp, homeSettings:
+				return m, nil
+			case homePostEncrypt:
+				if m.postPhase == postRecoveryAck {
+					return m, nil
+				}
+				m.returnToTab()
 				return m, nil
 			default:
 				m.returnToTab()
@@ -222,6 +265,7 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err := m.deps.Settings.Save(m.settings); err != nil {
 						m.settingsErr = "cannot write settings"
 					}
+					m.defaultSavedNotice = true
 					m.startSecret(m.pendingMode, "encrypt")
 				}
 			}
@@ -240,6 +284,10 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case homeSettings:
 			return m.updateSettings(msg)
+		case homeConfirmDecrypt:
+			return m.updateConfirmDecrypt(msg)
+		case homePostEncrypt:
+			return m.updatePostEncrypt(msg)
 		case homeStatus, homeHelp, homeResult:
 			m.returnToTab()
 			return m, nil
@@ -257,6 +305,9 @@ func (m *Home) typing() bool {
 
 func (m *Home) canSwitchTab(msg tea.KeyMsg) bool {
 	if m.typing() {
+		return false
+	}
+	if m.screen == homeConfirmDecrypt || m.screen == homePostEncrypt {
 		return false
 	}
 	switch msg.Type {
@@ -317,6 +368,10 @@ func (m *Home) returnToTab() {
 	m.pendingSecret = ""
 	m.pendingPath = ""
 	m.pendingKS = nil
+	m.pendingIdentity = nil
+	m.decryptDst = ""
+	m.defaultSavedNotice = false
+	m.postLocked, m.postOriginal, m.postRecovery = "", "", ""
 	m.activateTab()
 }
 
@@ -397,6 +452,9 @@ func (m *Home) runPicked(msg pickedMsg) {
 
 func (m *Home) startSecret(mode keystore.Mode, action string) {
 	m.pendingMode = mode
+	if action != "encrypt" {
+		m.defaultSavedNotice = false
+	}
 	file := ""
 	if action == "decrypt" {
 		file = m.pendingPath
@@ -433,8 +491,20 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 		m.setResult("", err)
 		return
 	}
-	// The TUI overwrites the original when it still exists next to the .pbx.
-	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{Force: true})
+	dst := strings.TrimSuffix(m.pendingPath, ".pbx")
+	if _, err := os.Stat(dst); err == nil {
+		m.pendingIdentity = identity
+		m.decryptDst = dst
+		m.screen = homeConfirmDecrypt
+		return
+	}
+	m.finishDecrypt(identity, false)
+}
+
+func (m *Home) finishDecrypt(identity *age.X25519Identity, force bool) {
+	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{Force: force})
+	m.pendingIdentity = nil
+	m.decryptDst = ""
 	if err != nil {
 		m.setResult("", err)
 		return
@@ -442,12 +512,37 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 	m.setResult(keystore.FormatDecryptSuccess(dst), nil)
 }
 
+func (m *Home) updateConfirmDecrypt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		if m.pendingIdentity == nil {
+			m.setResult("", errors.New("decrypt state lost"))
+			return m, nil
+		}
+		m.finishDecrypt(m.pendingIdentity, true)
+	case "n", "esc":
+		m.returnToTab()
+	}
+	return m, nil
+}
+
 // startEncryptWithSecret runs the encrypt flow with an already collected
-// secret: the 2FA QR screen for 2FA modes, otherwise the lock right away.
+// secret: the 2FA QR screen only when the shared install seed is missing.
 func (m *Home) startEncryptWithSecret(mode keystore.Mode, secret string) {
 	m.pendingMode = mode
 	m.pendingSecret = secret
 	if mode.Has2FA() {
+		if m.deps.TOTPStore != nil {
+			if ok, err := m.deps.TOTPStore.Exists(); err == nil && ok {
+				seed, err := m.deps.TOTPStore.Load()
+				if err != nil {
+					m.setResult("", errors.New("cannot read shared 2FA seed"))
+					return
+				}
+				m.doEncrypt(secret, seed)
+				return
+			}
+		}
 		seed, uri, err := m.deps.TOTP.GenerateSeed()
 		if err != nil {
 			m.setResult("", errors.New("cannot generate 2FA seed"))
@@ -463,11 +558,18 @@ func (m *Home) startEncryptWithSecret(mode keystore.Mode, secret string) {
 func (m *Home) run2FADone(msg twofaDoneMsg) {
 	secret := m.pendingSecret
 	m.pendingSecret = ""
+	if m.deps.TOTPStore != nil {
+		if err := m.deps.TOTPStore.Save(msg.seed); err != nil {
+			m.setResult("", errors.New("cannot save shared 2FA seed"))
+			return
+		}
+	}
 	m.doEncrypt(secret, msg.seed)
 }
 
 func (m *Home) doEncrypt(secret string, seed []byte) {
 	mode := m.pendingMode
+	original := m.pendingPath
 	var devSecret []byte
 	if mode.HasDeviceSecret() {
 		var err error
@@ -489,13 +591,47 @@ func (m *Home) doEncrypt(secret string, seed []byte) {
 		m.setResult("", err)
 		return
 	}
-	locked, err := m.deps.Vault.Lock(m.pendingPath, ks, vault.LockOptions{})
+	locked, err := m.deps.Vault.Lock(original, ks, vault.LockOptions{})
 	if err != nil {
 		m.setResult("", err)
 		return
 	}
 	m.pendingSecret = ""
-	m.setResult(keystore.FormatEncryptSuccess(locked, mode, false, identity.String()), nil)
+	m.postLocked = locked
+	m.postOriginal = original
+	m.postMode = mode
+	m.postRecovery = identity.String()
+	m.postPhase = postRecoveryAck
+	m.screen = homePostEncrypt
+}
+
+func (m *Home) updatePostEncrypt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.postPhase {
+	case postRecoveryAck:
+		if msg.Type == tea.KeyEnter || msg.String() == "y" {
+			m.postPhase = postKeepOriginal
+		}
+	case postKeepOriginal:
+		switch msg.String() {
+		case "k", "enter":
+			m.finishPostEncrypt(false)
+		case "r":
+			m.finishPostEncrypt(true)
+		}
+	}
+	return m, nil
+}
+
+func (m *Home) finishPostEncrypt(removeOriginal bool) {
+	if removeOriginal {
+		if err := os.Remove(m.postOriginal); err != nil && !os.IsNotExist(err) {
+			m.setResult("", fmt.Errorf("encrypted, but could not remove original: %w", err))
+			return
+		}
+	}
+	text := keystore.FormatEncryptSuccess(m.postLocked, m.postMode, removeOriginal, "")
+	m.postLocked, m.postOriginal, m.postRecovery = "", "", ""
+	m.setResult(text, nil)
 }
 
 func (m *Home) setResult(dst string, err error) {
@@ -514,8 +650,20 @@ func (m *Home) statusView() string {
 	if keyType == "" {
 		keyType = "(not set)"
 	}
-	return fmt.Sprintf("key type: %s\nauth-encrypt: %t\nsettings: %s\nversion: %s",
-		keyType, m.settings.AuthEncrypt, m.deps.Settings.Path(), m.deps.Version)
+	shared2FA := "not set"
+	if m.deps.TOTPStore != nil {
+		if ok, err := m.deps.TOTPStore.Exists(); err == nil && ok {
+			shared2FA = "configured"
+		}
+	}
+	device := "absent"
+	if m.deps.DevStore != nil {
+		if _, err := m.deps.DevStore.Load(); err == nil {
+			device = "present"
+		}
+	}
+	return fmt.Sprintf("default key type: %s\nrequire auth to encrypt: %t\nshared 2fa: %s\ndevice secret: %s\nsettings: %s\nversion: %s",
+		keyType, m.settings.AuthEncrypt, shared2FA, device, m.deps.Settings.Path(), m.deps.Version)
 }
 
 // chromeLines is the fixed vertical cost of header + tabs + footer around the box.
@@ -641,11 +789,16 @@ func (m *Home) contentBody(innerH int) string {
 		return m.picker.ContentView(innerH)
 	case homeChooser:
 		var b strings.Builder
-		b.WriteString("Key type not set in Settings\n\n")
+		b.WriteString("Default key type is not set yet.\n")
+		b.WriteString(m.th.dim.Render("This choice applies to new encrypts. Each .pbx keeps its own mode.") + "\n\n")
 		b.WriteString(m.chooser.View())
 		return b.String()
 	case homeSecret:
-		return m.prompt.ContentView()
+		notice := ""
+		if m.defaultSavedNotice {
+			notice = "Saved as the default for future encrypts. Change it in Settings."
+		}
+		return m.prompt.ContentViewWithNotice(notice)
 	case home2FA:
 		return m.twofa.ContentView()
 	case homeSettings:
@@ -659,19 +812,36 @@ func (m *Home) contentBody(innerH int) string {
 		}
 		var b strings.Builder
 		b.WriteString("Settings\n\n")
-		for i, line := range []string{"Key type: " + keyType, "Require authentication to encrypt: " + auth} {
+		for i, line := range []string{
+			"Default for new files: " + keyType,
+			"Require authentication to encrypt: " + auth,
+		} {
 			if i == m.setCursor {
 				b.WriteString("> " + m.th.selected.Render(line) + "\n")
 			} else {
 				b.WriteString("  " + line + "\n")
 			}
 		}
+		b.WriteString("\n")
+		b.WriteString(m.th.dim.Render("Changing the default does not alter existing .pbx files.") + "\n")
+		if note := m.settings.KeyType.Shared2FANote(); note != "" {
+			b.WriteString(m.th.dim.Render(note) + "\n")
+		}
 		b.WriteString("\n" + renderKeys(m.th, "{↑}/{↓} move • {Backspace} toggle • {A} apply • {Tab} next section"))
 		return b.String()
 	case homeStatus:
 		return "Status\n\n" + m.statusText
 	case homeHelp:
-		return "Help\n\n" + helpIntro + "\n\n" + renderKeys(m.th, helpText)
+		return "Help\n\n" + helpIntro + "\n\n" + helpFAQ + "\n\n" + renderKeys(m.th, helpText)
+	case homeConfirmDecrypt:
+		var b strings.Builder
+		b.WriteString("Overwrite existing file?\n\n")
+		b.WriteString(m.decryptDst + "\n\n")
+		b.WriteString("That path already exists next to the .pbx.\n")
+		b.WriteString(renderKeys(m.th, "{Enter}/{Y} overwrite • {N}/{Esc} cancel"))
+		return b.String()
+	case homePostEncrypt:
+		return m.postEncryptView()
 	case homeResult:
 		if m.resultIsErr {
 			return m.th.errS.Render(m.result)
@@ -679,6 +849,27 @@ func (m *Home) contentBody(innerH int) string {
 		return m.th.ok.Render(m.result)
 	}
 	return ""
+}
+
+func (m *Home) postEncryptView() string {
+	var b strings.Builder
+	switch m.postPhase {
+	case postRecoveryAck:
+		b.WriteString("Done. File encrypted successfully.\n")
+		fmt.Fprintf(&b, "Saved at: %s\n", m.postLocked)
+		fmt.Fprintf(&b, "This file was encrypted using %s, which will be required to open it.\n\n",
+			m.postMode.CredentialPhrase())
+		b.WriteString("Recovery key (shown once). Save it before continuing.\n")
+		b.WriteString(m.postRecovery)
+		b.WriteString("\n\n")
+		b.WriteString(renderKeys(m.th, "{Enter} I saved the recovery key"))
+	case postKeepOriginal:
+		b.WriteString("The original file is still in the folder.\n")
+		b.WriteString(m.postOriginal + "\n\n")
+		b.WriteString("Press Enter to continue and keep it, or R to remove it.\n\n")
+		b.WriteString(renderKeys(m.th, "{Enter}/{K} keep original • {R} remove original"))
+	}
+	return b.String()
 }
 
 // secretPrompt collects the secret for one operation, with the mode's rules
@@ -767,10 +958,13 @@ func (p *secretPrompt) ContentView() string {
 		}
 		b.WriteString(p.th.accent.Render(p.mode.NeedsSummary()) + "\n\n")
 	} else {
-		b.WriteString("Secret (" + string(p.mode) + ")\n\n")
+		b.WriteString("Encrypt this file (" + string(p.mode) + ")\n\n")
 	}
 	for _, rule := range auth.SecretRules(p.mode) {
 		b.WriteString(p.th.dim.Render(rule) + "\n")
+	}
+	if p.mode.Has2FA() && p.action != "decrypt" {
+		b.WriteString(p.th.dim.Render(p.mode.Shared2FANote()) + "\n")
 	}
 	label := "Passphrase: "
 	if p.mode.HasDeviceSecret() {
@@ -786,12 +980,20 @@ func (p *secretPrompt) ContentView() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// ContentViewWithNotice prepends the first-run default-saved line when set.
+func (p *secretPrompt) ContentViewWithNotice(notice string) string {
+	if notice == "" {
+		return p.ContentView()
+	}
+	return p.th.ok.Render(notice) + "\n\n" + p.ContentView()
+}
+
 func (p *secretPrompt) View() string {
 	return fit(p.ContentView()+"\n\n"+renderKeys(p.th, "{Tab} next field • {Enter} continue • {Esc} back • {Ctrl+C} abort"), maxWidth, maxHeight)
 }
 
-// twofaPrompt shows the QR code of the per-file TOTP seed and asks for one
-// valid code. Ctrl+C copies the URI to the clipboard.
+// twofaPrompt shows the QR code of the install-wide TOTP seed and asks for one
+// valid code. Ctrl+C copies the URI to the clipboard (does not quit).
 type twofaPrompt struct {
 	deps   *Deps
 	th     theme
@@ -843,12 +1045,13 @@ func (p *twofaPrompt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (p *twofaPrompt) ContentView() string {
 	// Side-by-side QR + code entry so the input survives the 24-line budget.
 	var b strings.Builder
-	b.WriteString("Set up 2FA for this file\n")
+	b.WriteString("Set up 2FA for this install\n")
 	qrLines := strings.Split(strings.TrimRight(p.qr, "\n"), "\n")
 	side := []string{
-		"Scan the QR, or ctrl+c copies the URI.",
+		"One QR for this install.",
+		"Ctrl+C copies URI (no quit).",
 		"",
-		"Enter the 6-digit code:",
+		"6-digit code:",
 		p.code.View(),
 	}
 	if p.copied != "" {

@@ -29,15 +29,16 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		dir: dir,
 		deps: &Deps{
-			Settings: keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
-			Wrapper:  keystore.NewWrapper(),
-			KDF:      auth.NewKDF(),
-			TOTP:     auth.NewTOTP(),
-			DevStore: auth.NewDeviceSecretStore(filepath.Join(dir, "cfg", "device.key")),
-			Vault:    vault.New(),
-			Stdin:    strings.NewReader(""),
-			Stdout:   new(bytes.Buffer),
-			Stderr:   new(bytes.Buffer),
+			Settings:  keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
+			Wrapper:   keystore.NewWrapper(),
+			KDF:       auth.NewKDF(),
+			TOTP:      auth.NewTOTP(),
+			DevStore:  auth.NewDeviceSecretStore(filepath.Join(dir, "cfg", "device.key")),
+			TOTPStore: auth.NewTOTPSeedStore(filepath.Join(dir, "cfg", "totp.seed")),
+			Vault:     vault.New(),
+			Stdin:     strings.NewReader(""),
+			Stdout:    new(bytes.Buffer),
+			Stderr:    new(bytes.Buffer),
 		},
 	}
 }
@@ -323,7 +324,7 @@ func TestCommandsTable(t *testing.T) {
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
 			args:     func(t *testing.T, e *env) []string { return []string{"status"} },
 			wantExit: ExitOK,
-			wantOut:  "key type: password",
+			wantOut:  "default key type: password",
 		},
 		{
 			name:  "export-key prints recovery key",

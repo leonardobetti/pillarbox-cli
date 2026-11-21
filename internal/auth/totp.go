@@ -24,10 +24,14 @@ func b32(seed []byte) string {
 
 // otpauthURI builds the otpauth:// URI for a seed. It stays compact on
 // purpose: the default algorithm, digits and period are implied, and a short
-// URI keeps the terminal QR code small enough for an 80x24 screen.
+// URI keeps the terminal QR code small enough for an 80x24 screen. The label
+// is install-wide because every 2FA file shares this seed.
 func otpauthURI(seed []byte) string {
-	return "otpauth://totp/pillarbox?secret=" + b32(seed)
+	return "otpauth://totp/Pillarbox:install?secret=" + b32(seed)
 }
+
+// OTPAuthURI returns the otpauth:// URI for an existing seed.
+func OTPAuthURI(seed []byte) string { return otpauthURI(seed) }
 
 // GenerateSeed returns 20 random bytes and their otpauth:// URI, PRD 7.1
 // step 5.

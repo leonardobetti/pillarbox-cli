@@ -22,9 +22,9 @@ The install script checks the archive against `checksums.txt` from the release.
 
 ## Quick start
 
-1. Run `pillarbox` in a terminal. The home menu opens with Encrypt, Decrypt, Status, Settings, and Help. Set a key type in Settings, or Encrypt asks on first use and saves it.
+1. Run `pillarbox` in a terminal. The home menu opens with Encrypt, Decrypt, Status, Settings, and Help. Set a default key type in Settings, or Encrypt asks on first use and saves that default.
 2. Encrypt a file with `pillarbox lock .env`. That writes `.env.pbx`: a `PBX1` header line plus a standard age payload. You type the secret each time. Save the recovery key when Pillarbox prints it. It shows that key once.
-3. Decrypt with `pillarbox unlock .env.pbx`. It reads the embedded key and asks for the secret. In the TUI, decrypt overwrites an existing original next to the `.pbx`.
+3. Decrypt with `pillarbox unlock .env.pbx`. It reads the embedded key and asks for the secret. In the TUI, decrypt asks before overwriting an existing original next to the `.pbx`.
 
 For scripts, pipe the secret:
 
@@ -34,7 +34,7 @@ printf '%s\n' "$MY_SECRET" | pillarbox --no-tui --secret-stdin lock .env
 
 ## Unlock modes
 
-Settings, or the first Encrypt, picks one of four key types. Each encrypted file carries its own key inside the `.pbx`. The secret screen lists the rules for that mode before you type.
+Settings set the default for new encrypts only. Each `.pbx` stores its own mode and key. Changing Settings does not alter existing files. The secret screen lists the rules for that mode before you type.
 
 | Mode | Secret | Device secret in the key | TOTP check |
 | --- | --- | --- | --- |
@@ -47,7 +47,9 @@ Settings, or the first Encrypt, picks one of four key types. Each encrypted file
 
 A 6-digit PIN has 1,000,000 values. At 0.5 seconds per Argon2id guess, a single core needs about six days. An attacker can use many cores. PIN modes mix a 32-byte device secret into the key. That secret lives in your config folder with mode `0600`. Files locked in PIN mode decrypt only on a machine that has the device secret, or with the recovery key. If someone copies the whole config folder, the PIN is the only protection left.
 
-### 2FA limit
+### 2FA
+
+2FA modes share one TOTP seed for the whole install. The QR appears once, on the first 2FA encrypt. Later 2FA files reuse that authenticator entry. Each `.pbx` still wraps the seed under its own key.
 
 A TOTP code, RFC 6238, expires every 30 seconds, so it cannot feed key derivation. Pillarbox checks the code after your secret unwraps the TOTP seed. An attacker who has the file key material and your secret, and who replaces the binary, can skip that check. The 2FA modes raise the cost of a stolen secret when people use the stock binary. They do not add key strength.
 
@@ -69,7 +71,7 @@ The recovery key is an `age` secret key. With it, stock `age` decrypts Pillarbox
 
 ## Keys
 
-Every screen shows shortcuts in the footer. Tab or left and right arrows switch the top tabs. Up and down move inside the box. Enter selects. Backspace goes to the parent directory or toggles the focused Settings option. Q quits. Ctrl+C aborts, or copies the 2FA URI on the QR screen. In Settings, A applies.
+Every screen shows shortcuts in the footer. Tab or left and right arrows switch the top tabs. Up and down move inside the box. Enter selects. Backspace goes to the parent directory or toggles the focused Settings option. Q quits. Ctrl+C aborts, or copies the 2FA URI on the QR screen without quitting. In Settings, A applies.
 
 ## Commands
 
@@ -78,10 +80,10 @@ Every screen shows shortcuts in the footer. Tab or left and right arrows switch 
 | `pillarbox` | Open the home menu on a TTY. Without a TTY, print help, or exit 5 if settings are missing. |
 | `pillarbox lock <path> [-o OUT] [--remove-original] [--force]` | Encrypt a file |
 | `pillarbox unlock <file.pbx> [-o OUT] [--force]` | Decrypt a `.pbx` file |
-| `pillarbox status` | Show key type, auth-encrypt, settings path, and version |
+| `pillarbox status` | Show default key type, auth-encrypt, shared 2FA, device secret, settings path, and version |
 | `pillarbox export-key <file.pbx>` | Print the recovery key of one file after authentication |
 | `pillarbox config set auth-encrypt true\|false` | Require the secret before the encrypt file picker. Default is false. |
-| `pillarbox config set key-type MODE` | Set the key type used for new files |
+| `pillarbox config set key-type MODE` | Set the default key type used for new files |
 | `pillarbox version` | Print the version |
 
 Global flags: `--no-tui`, `--secret-stdin`, `--totp CODE`, `--quiet`. No command accepts a secret as an argument.

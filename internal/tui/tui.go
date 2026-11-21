@@ -11,15 +11,16 @@ import (
 // Deps wires the core services into the TUI, mirroring cli.Deps. Tests inject
 // the real implementations rooted in temp dirs, or fakes for TOTP.
 type Deps struct {
-	Settings keystore.SettingsStore
-	Wrapper  keystore.Wrapper
-	KDF      auth.KDF
-	TOTP     auth.TOTP
-	DevStore auth.DeviceSecretStore
-	Vault    vault.Vault
-	Version  string
-	StartDir string             // picker start directory, default "."
-	CopyText func(string) error // clipboard write, e.g. atotto/clipboard
+	Settings  keystore.SettingsStore
+	Wrapper   keystore.Wrapper
+	KDF       auth.KDF
+	TOTP      auth.TOTP
+	DevStore  auth.DeviceSecretStore
+	TOTPStore auth.TOTPSeedStore
+	Vault     vault.Vault
+	Version   string
+	StartDir  string             // picker start directory, default "."
+	CopyText  func(string) error // clipboard write, e.g. atotto/clipboard
 }
 
 // RunHome runs the home menu, PRD 8.2, and returns the final model.

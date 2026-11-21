@@ -20,7 +20,10 @@ func SecretRules(m keystore.Mode) []string {
 		)
 	}
 	if m.Has2FA() {
-		rules = append(rules, "Plus a 6-digit TOTP code from your authenticator app at every unlock.")
+		rules = append(rules,
+			"Plus a 6-digit TOTP code from your authenticator app at every unlock.",
+			"One authenticator entry covers every 2FA file on this install.",
+		)
 	}
 	return rules
 }

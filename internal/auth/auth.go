@@ -38,6 +38,15 @@ type DeviceSecretStore interface {
 	LoadOrCreate() (secret []byte, created bool, err error)
 }
 
+// TOTPSeedStore owns <config>/pillarbox/totp.seed: one 20-byte seed for every
+// 2FA file on this install. The authenticator QR is shown once, then reused.
+type TOTPSeedStore interface {
+	Path() string
+	Exists() (bool, error)
+	Load() ([]byte, error)
+	Save(seed []byte) error
+}
+
 // TOTP is RFC 6238 TOTP, PRD sections 6.4, 7.1 step 5 and 7.4 step 2.
 type TOTP interface {
 	GenerateSeed() (seed []byte, otpauthURI string, err error)

@@ -21,7 +21,7 @@ func TestSecretRulesMatchValidation(t *testing.T) {
 		} else if !strings.Contains(joined, "at least 12 characters") {
 			t.Errorf("mode %s: rules %q do not state the passphrase length rule", m, joined)
 		}
-		if m.Has2FA() && !strings.Contains(joined, "TOTP") {
+		if m.Has2FA() && (!strings.Contains(joined, "TOTP") || !strings.Contains(joined, "One authenticator")) {
 			t.Errorf("mode %s: rules %q do not mention the 2FA code", m, joined)
 		}
 	}

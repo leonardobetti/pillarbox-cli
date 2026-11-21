@@ -36,14 +36,15 @@ func testDeps(t *testing.T) *Deps {
 	t.Helper()
 	dir := t.TempDir()
 	return &Deps{
-		Settings: keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
-		Wrapper:  keystore.NewWrapper(),
-		KDF:      auth.NewKDF(),
-		TOTP:     &fakeTOTP{},
-		DevStore: auth.NewDeviceSecretStore(filepath.Join(dir, "cfg", "device.key")),
-		Vault:    vault.New(),
-		Version:  "0.1.0-test",
-		StartDir: dir,
+		Settings:  keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
+		Wrapper:   keystore.NewWrapper(),
+		KDF:       auth.NewKDF(),
+		TOTP:      &fakeTOTP{},
+		DevStore:  auth.NewDeviceSecretStore(filepath.Join(dir, "cfg", "device.key")),
+		TOTPStore: auth.NewTOTPSeedStore(filepath.Join(dir, "cfg", "totp.seed")),
+		Vault:     vault.New(),
+		Version:   "0.1.0-test",
+		StartDir:  dir,
 	}
 }
 
@@ -89,6 +90,16 @@ func pickPBX(tm *teatest.TestModel) {
 	tm.Send(key(tea.KeyDown)) // cfg/ -> a.txt
 	tm.Send(key(tea.KeyDown)) // a.txt -> a.txt.pbx
 	tm.Send(key(tea.KeyEnter))
+}
+
+// ackPostEncrypt confirms the recovery key, then keeps the original file.
+func ackPostEncrypt(t *testing.T, tm *teatest.TestModel, a *acc) {
+	t.Helper()
+	waitFor(t, tm, a, "Recovery key", "I saved the recovery key")
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Press Enter to continue", "keep original")
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Done. File encrypted successfully.")
 }
 
 func TestHomeLayoutShowsProposalChrome(t *testing.T) {
@@ -141,10 +152,10 @@ func TestHomeEncryptFileWithOwnKey(t *testing.T) {
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
-	waitFor(t, tm, a, "Secret (password)", "at least 12 characters")
+	waitFor(t, tm, a, "Encrypt this file (password)", "at least 12 characters")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter))
-	waitFor(t, tm, a, ".pbx")
+	ackPostEncrypt(t, tm, a)
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
@@ -175,13 +186,13 @@ func TestHomeEncryptAsksKeyTypeWhenUnset(t *testing.T) {
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, false)
-	waitFor(t, tm, a, "Key type not set", "pin")
+	waitFor(t, tm, a, "Default key type is not set", "pin")
 	tm.Send(key(tea.KeyDown))  // -> pin
 	tm.Send(key(tea.KeyEnter)) // choose pin -> secret screen
-	waitFor(t, tm, a, "Secret (pin)", "6 to 12 digits")
+	waitFor(t, tm, a, "Saved as the default for future encrypts", "Encrypt this file (pin)", "6 to 12 digits")
 	tm.Type("123456")
 	tm.Send(key(tea.KeyEnter))
-	waitFor(t, tm, a, ".pbx")
+	ackPostEncrypt(t, tm, a)
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
@@ -234,10 +245,10 @@ func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
-	waitFor(t, tm, a, "Secret (password)")
+	waitFor(t, tm, a, "Encrypt this file (password)")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter))
-	waitFor(t, tm, a, ".pbx")
+	ackPostEncrypt(t, tm, a)
 
 	if err := os.WriteFile(src, []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
@@ -254,6 +265,8 @@ func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 	pickPBX(tm)
 	waitFor(t, tm, a2, "a.txt.pbx", "This file needs a passphrase.")
 	tm.Type("correct horse battery staple")
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a2, "Overwrite existing file?")
 	tm.Send(key(tea.KeyEnter))
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -282,8 +295,8 @@ func TestTwofaViewFits24Lines(t *testing.T) {
 	if len(lines) > 24 {
 		t.Fatalf("2FA view is %d lines, want <= 24", len(lines))
 	}
-	if !strings.Contains(v, "6-digit code") || !strings.Contains(v, "continue") {
-		t.Fatal("2FA view lost the code entry or the footer")
+	if !strings.Contains(v, "6-digit code") || !strings.Contains(v, "Set up 2FA for this install") {
+		t.Fatal("2FA view lost the code entry or the setup title")
 	}
 }
 
@@ -299,12 +312,12 @@ func TestHomeEncryptAuthGate(t *testing.T) {
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	// Auth-encrypt on: opening Encrypt asks for the secret before the picker.
-	waitFor(t, tm, a, "Secret (password)")
+	waitFor(t, tm, a, "Encrypt this file (password)")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter))
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
-	waitFor(t, tm, a, ".pbx")
+	ackPostEncrypt(t, tm, a)
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
@@ -324,7 +337,7 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // Encrypt -> Decrypt -> Status -> Settings
 	}
-	waitFor(t, tm, a, "Key type:", "Require authentication to encrypt: no", "apply")
+	waitFor(t, tm, a, "Default for new files:", "Require authentication to encrypt: no", "apply")
 
 	tm.Send(key(tea.KeyDown))                   // cursor -> auth-encrypt
 	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // toggle to yes
@@ -345,7 +358,8 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 
 	// Tab must leave Settings for Help, not cycle options.
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
-	waitFor(t, tm, a, "Help", "Argon2id", "Leonardo Betti", "Nasser Khalil", "LLMs")
+	waitFor(t, tm, a, "Help", "Argon2id", "Leonardo Betti", "Nasser Khalil", "LLMs",
+		"Settings set the default for NEW files", "one QR for this install")
 	if !bytes.Contains(a.b, []byte("to quit")) {
 		t.Fatal("footer missing during settings navigation")
 	}
@@ -370,11 +384,11 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
-	waitFor(t, tm, a, "Secret (password+2fa)")
+	waitFor(t, tm, a, "Encrypt this file (password+2fa)", "One authenticator entry")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter))
 
-	waitFor(t, tm, a, "█", "Scan the QR", "Enter the 6-digit code")
+	waitFor(t, tm, a, "█", "Set up 2FA for this install", "One QR for this install", "6-digit code")
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitFor(t, tm, a, "copied 2FA URI to clipboard")
 	if len(copied) != 1 || !strings.HasPrefix(copied[0], "otpauth://") {
@@ -383,13 +397,41 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 
 	tm.Type("123456")
 	tm.Send(key(tea.KeyEnter))
-	waitFor(t, tm, a, ".pbx")
+	ackPostEncrypt(t, tm, a)
+
+	if ok, err := deps.TOTPStore.Exists(); err != nil || !ok {
+		t.Fatalf("shared TOTP seed not saved: %v, %v", ok, err)
+	}
+
+	// Second 2FA encrypt reuses the seed and skips the QR.
+	if err := os.WriteFile(filepath.Join(deps.StartDir, "b.txt"), []byte("hi2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tm.Send(key(tea.KeyEnter)) // leave result
+	a2 := &acc{}
+	waitFor(t, tm, a2, "Select a file to encrypt")
+	tm.Send(key(tea.KeyDown)) // parent
+	tm.Send(key(tea.KeyDown)) // cfg
+	tm.Send(key(tea.KeyDown)) // a.txt
+	tm.Send(key(tea.KeyDown)) // a.txt.pbx
+	tm.Send(key(tea.KeyDown)) // b.txt
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a2, "Encrypt this file (password+2fa)")
+	tm.Type("correct horse battery staple")
+	tm.Send(key(tea.KeyEnter))
+	ackPostEncrypt(t, tm, a2)
+	if bytes.Contains(a2.b, []byte("Set up 2FA for this install")) {
+		t.Fatal("second 2FA encrypt showed the QR again")
+	}
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
 	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx")); err != nil {
 		t.Fatalf("no .pbx output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(deps.StartDir, "b.txt.pbx")); err != nil {
+		t.Fatalf("no second .pbx output: %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(deps.StartDir, "a.txt.pbx"))
 	if err != nil || !strings.HasPrefix(string(b), "PBX1 ") {

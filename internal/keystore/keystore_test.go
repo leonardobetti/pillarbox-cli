@@ -210,9 +210,9 @@ func TestModeHelpers(t *testing.T) {
 		summary string
 	}{
 		{ModePassword, true, false, false, "This file needs a passphrase."},
-		{ModePIN, true, false, true, "This file needs a PIN."},
+		{ModePIN, true, false, true, "This file needs a PIN on this machine (or the recovery key)."},
 		{ModePassword2FA, true, true, false, "This file needs a passphrase and a 2FA code."},
-		{ModePIN2FA, true, true, true, "This file needs a PIN and a 2FA code."},
+		{ModePIN2FA, true, true, true, "This file needs a PIN on this machine and a 2FA code (or the recovery key)."},
 		{Mode("bogus"), false, false, false, "This file needs unlock credentials."},
 	}
 	for _, c := range cases {

@@ -1,152 +1,80 @@
-# ARCHITECTURE
+# Architecture
 
-Interface design for the Pillarbox core. This document plus the three
-interface files are the whole change: no implementation. Based on
-the product requirements that guided v0.1.
+Interface design for the Pillarbox core. Callers in `internal/cli` and
+`internal/tui` depend on the interfaces in `internal/auth`, `internal/keystore`,
+and `internal/vault`.
 
-Goal: one person builds the core implementations (internal/keystore,
-internal/auth, internal/vault) while another builds internal/cli and
-internal/tui against fakes. cli and tui therefore depend only on the
-interfaces declared here, never on concrete core types.
+## Model
+
+- Settings (`settings.json`) hold the default key type for new encrypts and the
+  auth-encrypt toggle. Changing Settings does not rewrite existing `.pbx` files.
+- Every `lock` creates a fresh age identity, wraps it under a KEK derived from
+  the secret (and the device secret for PIN modes), and embeds the keystore in
+  a `PBX1` header on the `.pbx`.
+- PIN modes use one machine-local `device.key`.
+- 2FA modes use one install-wide `totp.seed`. The QR is shown once. Every 2FA
+  file wraps that same seed under its own KEK. Decrypt still asks for a TOTP
+  code after the secret unwraps the seed from that file.
 
 ## How callers use the core
 
-### CLI, scripts path (`--no-tui`, PRD 8.3 and 9)
+### CLI (`--no-tui`)
 
-`init --mode M [--force]`
+`lock <path>`
 
-1. `store` = keystore `Store` at `os.UserConfigDir()/pillarbox/keystore.json`
-2. if `store.Exists()` and not `--force` → exit 1
-3. `secret` = `prompter.ReadSecretTwice()` (or `--secret-stdin`)
-4. if mode is `pin` or `pin+2fa` → `deviceSecret` = `deviceStore.LoadOrCreate()` (PRD 6.3)
-5. `kek` = `kdf.DeriveKEK(secret, salt, deviceSecret, keystore.DefaultArgon2Params)` (PRD 7.1 step 3)
-6. `identity` = `age.GenerateX25519Identity()` (library call, PRD 7.1 step 1)
-7. build `ks *keystore.Keystore`; `ks.WrappedIdentity` = `wrapper.Wrap(kek, ks, identitySecretBytes)` (PRD 7.1 step 4)
-8. if 2FA mode → `seed, uri` = `totp.GenerateSeed()`; show URI and QR; `code` = `prompter.ReadTOTP()`; `totp.Verify(seed, code, 0)`; `ks.WrappedTOTPSeed` = `wrapper.Wrap(kek, ks, seed)` (PRD 7.1 step 5)
-9. `store.Save(ks)` once, at the end; show the recovery key once (PRD 6.6)
+1. Load default mode from Settings (exit 5 if unset).
+2. Read the secret. For PIN modes, `DevStore.LoadOrCreate()`.
+3. For 2FA modes, load `totp.seed` or generate, verify one code, and save it.
+4. Build a per-file keystore with `Initializer.Initialize`.
+5. `Vault.Lock` writes the `.pbx` with the key in the PBX1 header.
+6. Print the recovery key once (unless `--quiet`).
 
-`lock <path> [-o OUT] [--remove-original] [--force]`
+`unlock <file.pbx>`
 
-1. `ks` = `store.Load()`; `ErrNotFound`/`ErrInvalid` → exit 5 (on a TTY, section 8.1 starts onboarding instead)
-2. if `ks.Policy.GateEncrypt` → `authenticator.Authenticate(ks, secret, code)`; `ErrAuth` → exit 3 (PRD 7.3 step 1)
-3. `vault.Lock(path, ks.Recipient, LockOptions{...})`
+1. `Vault.ReadKey` loads the embedded keystore.
+2. `Authenticator.Authenticate` with secret and optional TOTP code.
+3. Persist `LastTOTPStep` via `Vault.SaveKey` when needed.
+4. `Vault.Unlock` (CLI requires `--force` to overwrite).
 
-`unlock <file.pbx> [-o OUT] [--force]`
+`status` prints default key type, auth-encrypt, whether shared 2FA and the
+device secret exist, the settings path, and the version. It never prints
+secrets.
 
-1. `ks` = `store.Load()` → exit 5 if missing
-2. `secret` = `--secret-stdin` or `prompter.ReadSecret()`; `code` = `--totp` or `prompter.ReadTOTP()`
-3. `identityBytes, newStep, err` = `authenticator.Authenticate(ks, secret, code)`; `ErrAuth` → exit 3
-4. if 2FA mode → `ks.LastTOTPStep = &newStep`; `store.Save(ks)` (PRD 7.4 step 2)
-5. `identity` = `age.ParseIdentities(string(identityBytes))`
-6. `vault.Unlock(src, identity, UnlockOptions{...})`; `ErrIntegrity` → exit 4
+`export-key` authenticates and prints the recovery key for one file.
 
-`status` prints mode, 2FA state, keystore path and version from `store.Load()` and never prints secret material (FR-13). `export-key` authenticates and prints the recovery key (PRD 6.6).
+### TUI
 
-### TUI path (PRD 8.1, 8.2)
+Same core calls. Extra UX:
 
-Same calls, different `SecretPrompter`: Huh forms instead of `x/term`. The
-onboarding screens map one-to-one onto the `init` sequence above, and Esc
-writes nothing, so `store.Save` still happens once at the end. The home menu
-items call the lock/unlock flows above. Interface tests run under teatest with
-a fake `SecretPrompter` and a fake `Vault`.
+- First-time key type chooser saves the Settings default and says so.
+- Shared 2FA QR only when `totp.seed` is missing.
+- After encrypt: acknowledge the recovery key, then keep or remove the original.
+- Before decrypt overwrite: confirm when the destination already exists.
 
 ## Dependency graph
 
 ```
 cli, tui → auth, keystore, vault
 auth     → keystore
-vault    → archive, filippo.io/age
-archive  → stdlib only
+vault    → keystore, filippo.io/age
 keystore → stdlib only
 ```
 
-No cycles. keystore stays schema-only: it stores the recipient as a string
-and never imports age; vault owns all age types and parses the recipient.
+## Config paths
 
-## Shapes considered
+| Path | Role |
+| --- | --- |
+| `<config>/pillarbox/settings.json` | Default key type, auth-encrypt |
+| `<config>/pillarbox/device.key` | 32-byte PIN device secret |
+| `<config>/pillarbox/totp.seed` | 20-byte shared TOTP seed |
 
-- **Shape A, capability interfaces (chosen).** Each capability is a small
-  interface: `keystore.Store`, `keystore.Wrapper`, `auth.KDF`, `auth.TOTP`,
-  `auth.DeviceSecretStore`, `auth.SecretPrompter`, `auth.Authenticator`,
-  `vault.Vault`. Callers compose exactly what a flow needs. Every piece of
-  state has one owner (Store owns keystore.json, DeviceSecretStore owns
-  device.key, Vault owns output files) and a fake is a single-method struct.
-- **Shape B, one facade per package** (`keystore.Service`, `auth.Service`,
-  `vault.Service`). Fewer types, but every fake must stub the whole facade,
-  state ownership blurs (auth would need the Store inside), and callers must
-  know more of the core to wire one flow. Rejected.
+## Errors to exit codes
 
-## Interfaces
-
-### internal/keystore/keystore.go
-
-| Name | Kind | Contract |
-| --- | --- | --- |
-| `Mode` | string type | `password`, `pin`, `password+2fa`, `pin+2fa`; persisted values, stable (PRD 6.2) |
-| `Argon2Params`, `DefaultArgon2Params` | struct, var | t=3, m=64 MiB, p=4 (PRD 7.1 step 3) |
-| `WrappedKey` | struct | nonce + ciphertext (PRD 7.2) |
-| `Policy` | struct | `GateEncrypt` (PRD 7.2) |
-| `Keystore` | struct | the keystore.json schema (PRD 7.2) |
-| `ErrNotFound`, `ErrInvalid` | sentinels | map to exit 5 |
-| `Store` | interface | `Path/Exists/Load/Save`; only writer; atomic temp+fsync+rename, mode 0600 (PRD 7.1 step 6) |
-| `Wrapper` | interface | `Wrap/Unwrap` under a KEK, XChaCha20-Poly1305, AAD = version+mode+recipient (PRD 7.1 step 4) |
-
-### internal/auth/auth.go
-
-| Name | Kind | Contract |
-| --- | --- | --- |
-| `ErrAuth` | sentinel | the only auth error; identical for wrong secret and wrong code (PRD 7.4 step 1, FR-07) |
-| `SecretPrompter` | interface | `ReadSecret/ReadSecretTwice/ReadTOTP`; no-echo, never in argv/logs/errors |
-| `KDF` | interface | `DeriveKEK`: Argon2id then HKDF-SHA256, info `pillarbox/kek/v1` (PRD 7.1 step 3) |
-| `DeviceSecretStore` | interface | `LoadOrCreate`: 32 bytes, mode 0600 (PRD 6.3) |
-| `TOTP` | interface | `GenerateSeed` + `Verify(seed, code, lastStep)`: current step ±1, reject replay (PRD 7.4 step 2, FR-08) |
-| `Authenticator` | interface | `Authenticate(ks, secret, code)` → identity bytes + TOTP step; the one unlock call for cli and tui |
-
-### internal/vault/vault.go
-
-| Name | Kind | Contract |
-| --- | --- | --- |
-| `ErrIntegrity` | sentinel | tampered .pbx or unsafe archive entry; partial output removed; maps to exit 4 |
-| `LockOptions`, `UnlockOptions` | structs | the lock/unlock flags (PRD 9) |
-| `Vault` | interface | `Lock(src, recipient, opts)` and `Unlock(src, identity, opts)`: age streaming, tar for folders, temp+fsync+rename mode 0600, no partial output (PRD 7.3, 7.4) |
-
-## Errors to exit codes (PRD 9)
-
-| Condition | Error | Exit |
-| --- | --- | --- |
-| success | — | 0 |
-| any other failure | — | 1 |
-| usage error | cobra | 2 |
-| wrong secret or wrong TOTP | `auth.ErrAuth` | 3 |
-| tampered .pbx, unsafe archive entry | `vault.ErrIntegrity` | 4 |
-| keystore missing or invalid | `keystore.ErrNotFound`, `keystore.ErrInvalid` | 5 |
-
-## Invariants every implementation must keep
-
-- Secrets never appear in argv, logs or errors (repo conventions). Prompts return
-  `[]byte`; error values carry no secret material; `ErrAuth` has a fixed
-  message.
-- `keystore.Store` is the only writer of keystore.json; saves are atomic
-  (temp file, fsync, rename) with mode 0600 (PRD 7.1 step 6).
-- device.key is 32 random bytes, mode 0600 (PRD 6.3).
-- Vault writes outputs as temp file in the target directory, mode 0600,
-  fsync, rename; any failure leaves no partial output (PRD 7.3 step 3,
-  7.4 step 4).
-- A failed unwrap never says which factor failed (PRD 7.4 step 1).
-- TOTP accepts the current step and one either side, rejects a reused step
-  (PRD 7.4 step 2).
-- Extraction rejects `..`, absolute paths and symlinks resolving outside the
-  target (PRD 7.4 step 3).
-- No network calls, no telemetry (FR-14).
-
-## Fakes for parallel work
-
-cli and tui tests define their own fakes implementing the interfaces above:
-`fakeStore`, `fakeWrapper`, `fakeKDF`, `fakeTOTP`, `fakeDeviceSecret`,
-`fakePrompter`, `fakeAuthenticator`, `fakeVault`. No core implementation is
-needed to build or test cli and tui.
-
-## Not in this change
-
-Implementations of the remaining interfaces above (keystore.Store, auth),
-the TUI models, and keeping architecture notes here.
+| Condition | Exit |
+| --- | --- |
+| success | 0 |
+| other failure | 1 |
+| usage error | 2 |
+| wrong secret or TOTP | 3 |
+| integrity failure | 4 |
+| settings or file key missing or invalid | 5 |

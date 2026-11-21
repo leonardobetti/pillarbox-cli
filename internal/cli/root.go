@@ -20,16 +20,17 @@ import (
 // Deps wires the core services into the CLI. Production uses DefaultDeps;
 // tests inject real implementations rooted in temp dirs or fakes.
 type Deps struct {
-	Settings keystore.SettingsStore
-	Wrapper  keystore.Wrapper
-	KDF      auth.KDF
-	TOTP     auth.TOTP
-	DevStore auth.DeviceSecretStore
-	Vault    vault.Vault
-	Prompter auth.SecretPrompter
-	Stdin    io.Reader
-	Stdout   io.Writer
-	Stderr   io.Writer
+	Settings  keystore.SettingsStore
+	Wrapper   keystore.Wrapper
+	KDF       auth.KDF
+	TOTP      auth.TOTP
+	DevStore  auth.DeviceSecretStore
+	TOTPStore auth.TOTPSeedStore
+	Vault     vault.Vault
+	Prompter  auth.SecretPrompter
+	Stdin     io.Reader
+	Stdout    io.Writer
+	Stderr    io.Writer
 
 	opts options
 }
@@ -71,17 +72,22 @@ func DefaultDeps() (*Deps, error) {
 	if err != nil {
 		return nil, err
 	}
+	totpPath, err := auth.DefaultTOTPSeedPath()
+	if err != nil {
+		return nil, err
+	}
 	return &Deps{
-		Settings: settings,
-		Wrapper:  keystore.NewWrapper(),
-		KDF:      auth.NewKDF(),
-		TOTP:     auth.NewTOTP(),
-		DevStore: auth.NewDeviceSecretStore(devPath),
-		Vault:    vault.New(),
-		Prompter: termPrompter{},
-		Stdin:    os.Stdin,
-		Stdout:   os.Stdout,
-		Stderr:   os.Stderr,
+		Settings:  settings,
+		Wrapper:   keystore.NewWrapper(),
+		KDF:       auth.NewKDF(),
+		TOTP:      auth.NewTOTP(),
+		DevStore:  auth.NewDeviceSecretStore(devPath),
+		TOTPStore: auth.NewTOTPSeedStore(totpPath),
+		Vault:     vault.New(),
+		Prompter:  termPrompter{},
+		Stdin:     os.Stdin,
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
 	}, nil
 }
 
@@ -179,15 +185,16 @@ func (d *Deps) interactive() bool {
 
 func (d *Deps) tuiDeps() *tui.Deps {
 	return &tui.Deps{
-		Settings: d.Settings,
-		Wrapper:  d.Wrapper,
-		KDF:      d.KDF,
-		TOTP:     d.TOTP,
-		DevStore: d.DevStore,
-		Vault:    d.Vault,
-		Version:  Version,
-		StartDir: ".",
-		CopyText: clipboard.WriteAll,
+		Settings:  d.Settings,
+		Wrapper:   d.Wrapper,
+		KDF:       d.KDF,
+		TOTP:      d.TOTP,
+		DevStore:  d.DevStore,
+		TOTPStore: d.TOTPStore,
+		Vault:     d.Vault,
+		Version:   Version,
+		StartDir:  ".",
+		CopyText:  clipboard.WriteAll,
 	}
 }
 
@@ -268,27 +275,9 @@ func (d *Deps) buildFileKey(mode keystore.Mode) (*keystore.Keystore, string, err
 	}
 	var seed []byte
 	if mode.Has2FA() {
-		var uri string
-		// PILLARBOX_E2E_TOTP_SEED is a test hook used only by scripts/e2e.sh;
-		// it is unset in production and still requires a valid code.
-		if s := os.Getenv("PILLARBOX_E2E_TOTP_SEED"); s != "" {
-			seed, uri, err = auth.GenerateSeedFromBase32(s)
-		} else {
-			seed, uri, err = d.TOTP.GenerateSeed()
-		}
-		if err != nil {
-			return nil, "", &exitError{ExitOther, "cannot generate TOTP seed"}
-		}
-		if d.interactive() {
-			d.println("2FA URI: " + uri)
-		}
-		code, err := d.readTOTP()
+		seed, err = d.resolveSharedTOTPSeed()
 		if err != nil {
 			return nil, "", err
-		}
-		ok, _, verr := d.TOTP.Verify(seed, code, -1)
-		if verr != nil || !ok {
-			return nil, "", &exitError{ExitAuth, "authentication failed; check the secret and the 2FA code"}
 		}
 	}
 	ks, err := auth.NewInitializer(d.KDF, d.Wrapper).Initialize(
@@ -310,6 +299,55 @@ func (d *Deps) loadFileKey(src string) (*keystore.Keystore, error) {
 		return nil, &exitError{ExitOther, "cannot read file key"}
 	}
 	return ks, nil
+}
+
+// resolveSharedTOTPSeed returns the install-wide TOTP seed. When the seed file
+// already exists it is reused with no QR. On first use it generates (or reads
+// PILLARBOX_E2E_TOTP_SEED), verifies one code, and saves the seed.
+func (d *Deps) resolveSharedTOTPSeed() ([]byte, error) {
+	if d.TOTPStore == nil {
+		return nil, &exitError{ExitOther, "TOTP seed store is not configured"}
+	}
+	exists, err := d.TOTPStore.Exists()
+	if err != nil {
+		return nil, &exitError{ExitOther, "cannot read shared 2FA seed"}
+	}
+	if exists {
+		seed, err := d.TOTPStore.Load()
+		if err != nil {
+			return nil, &exitError{ExitOther, "cannot read shared 2FA seed"}
+		}
+		return seed, nil
+	}
+
+	var seed []byte
+	var uri string
+	// PILLARBOX_E2E_TOTP_SEED is a test hook used only by scripts/e2e.sh;
+	// it is unset in production and still requires a valid code.
+	if s := os.Getenv("PILLARBOX_E2E_TOTP_SEED"); s != "" {
+		seed, uri, err = auth.GenerateSeedFromBase32(s)
+	} else {
+		seed, uri, err = d.TOTP.GenerateSeed()
+	}
+	if err != nil {
+		return nil, &exitError{ExitOther, "cannot generate TOTP seed"}
+	}
+	if d.interactive() || !d.opts.quiet {
+		d.println("Set up 2FA once for this install. One authenticator entry covers every 2FA file.")
+		d.println("2FA URI: " + uri)
+	}
+	code, err := d.readTOTP()
+	if err != nil {
+		return nil, err
+	}
+	ok, _, verr := d.TOTP.Verify(seed, code, -1)
+	if verr != nil || !ok {
+		return nil, &exitError{ExitAuth, "authentication failed; check the secret and the 2FA code"}
+	}
+	if err := d.TOTPStore.Save(seed); err != nil {
+		return nil, &exitError{ExitOther, "cannot save shared 2FA seed"}
+	}
+	return seed, nil
 }
 
 // authenticate runs the unlock flow and maps failures to exit codes: no input

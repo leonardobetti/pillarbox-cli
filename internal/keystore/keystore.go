@@ -31,6 +31,14 @@ func (m Mode) Valid() bool {
 // Has2FA reports whether the mode verifies a TOTP code, PRD 6.2.
 func (m Mode) Has2FA() bool { return m == ModePassword2FA || m == ModePIN2FA }
 
+// Shared2FANote explains that 2FA uses one install-wide authenticator entry.
+func (m Mode) Shared2FANote() string {
+	if !m.Has2FA() {
+		return ""
+	}
+	return "2FA uses one authenticator entry for this install. The QR appears once, on the first 2FA encrypt."
+}
+
 // HasDeviceSecret reports whether the mode mixes the device secret into the
 // KEK, PRD 6.3.
 func (m Mode) HasDeviceSecret() bool { return m == ModePIN || m == ModePIN2FA }
@@ -42,11 +50,11 @@ func (m Mode) NeedsSummary() string {
 	case ModePassword:
 		return "This file needs a passphrase."
 	case ModePIN:
-		return "This file needs a PIN."
+		return "This file needs a PIN on this machine (or the recovery key)."
 	case ModePassword2FA:
 		return "This file needs a passphrase and a 2FA code."
 	case ModePIN2FA:
-		return "This file needs a PIN and a 2FA code."
+		return "This file needs a PIN on this machine and a 2FA code (or the recovery key)."
 	default:
 		return "This file needs unlock credentials."
 	}
