@@ -134,7 +134,7 @@ func checkOutputFree(dst string, force bool) error {
 		return nil
 	}
 	if _, err := os.Stat(dst); err == nil {
-		return fmt.Errorf("output exists: %s (use --force to overwrite)", dst)
+		return fmt.Errorf("%w: %s (use --force to overwrite)", ErrExists, dst)
 	}
 	return nil
 }

@@ -1,30 +1,17 @@
 package cli
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 )
 
 func TestVersionCommandPrintsVersion(t *testing.T) {
-	buf := new(bytes.Buffer)
-	versionCmd.SetOut(buf)
-	defer versionCmd.SetOut(nil)
-
-	if err := versionCmd.RunE(versionCmd, nil); err != nil {
-		t.Fatalf("version command returned error: %v", err)
+	e := newEnv(t)
+	code, out, errOut := e.run(t, "", "version")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, stderr %q", code, errOut)
 	}
-	want := "pillarbox version " + Version
-	if got := buf.String(); !strings.Contains(got, want) {
-		t.Fatalf("output %q does not contain %q", got, want)
+	if !strings.Contains(out, "pillarbox version "+Version) {
+		t.Fatalf("stdout = %q, want it to contain %q", out, "pillarbox version "+Version)
 	}
-}
-
-func TestRootCommandHasVersionSubcommand(t *testing.T) {
-	for _, c := range rootCmd.Commands() {
-		if c.Name() == "version" {
-			return
-		}
-	}
-	t.Fatal("root command has no version subcommand")
 }

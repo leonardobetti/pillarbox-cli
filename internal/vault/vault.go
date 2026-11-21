@@ -11,6 +11,10 @@ import (
 // returning it, PRD 7.4 step 4. cli maps it to exit code 4.
 var ErrIntegrity = errors.New("integrity failure")
 
+// ErrExists marks an output path that already exists without --force, PRD
+// 7.4 step 3. cli maps it to exit code 2.
+var ErrExists = errors.New("output exists")
+
 // LockOptions mirrors the lock flags, PRD section 9.
 type LockOptions struct {
 	Out            string // -o; default <name>.pbx for a file, <dir>.tar.pbx for a folder

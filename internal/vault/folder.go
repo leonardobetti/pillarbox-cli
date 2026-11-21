@@ -83,7 +83,7 @@ func (v ageVault) unlockFolder(src string, identity age.Identity, opts UnlockOpt
 	})
 	if err != nil {
 		if errors.Is(err, archive.ErrExists) {
-			return "", err
+			return "", fmt.Errorf("%w: %v", ErrExists, err)
 		}
 		return "", fmt.Errorf("%w: %v", ErrIntegrity, err)
 	}
