@@ -203,20 +203,24 @@ func TestWrapperAADBindsToKeystore(t *testing.T) {
 
 func TestModeHelpers(t *testing.T) {
 	cases := []struct {
-		m      Mode
-		valid  bool
-		has2fa bool
-		hasDev bool
+		m       Mode
+		valid   bool
+		has2fa  bool
+		hasDev  bool
+		summary string
 	}{
-		{ModePassword, true, false, false},
-		{ModePIN, true, false, true},
-		{ModePassword2FA, true, true, false},
-		{ModePIN2FA, true, true, true},
-		{Mode("bogus"), false, false, false},
+		{ModePassword, true, false, false, "This file needs a passphrase."},
+		{ModePIN, true, false, true, "This file needs a PIN."},
+		{ModePassword2FA, true, true, false, "This file needs a passphrase and a 2FA code."},
+		{ModePIN2FA, true, true, true, "This file needs a PIN and a 2FA code."},
+		{Mode("bogus"), false, false, false, "This file needs unlock credentials."},
 	}
 	for _, c := range cases {
 		if c.m.Valid() != c.valid || c.m.Has2FA() != c.has2fa || c.m.HasDeviceSecret() != c.hasDev {
 			t.Fatalf("mode %q: got valid=%v 2fa=%v dev=%v", c.m, c.m.Valid(), c.m.Has2FA(), c.m.HasDeviceSecret())
+		}
+		if got := c.m.NeedsSummary(); got != c.summary {
+			t.Fatalf("mode %q NeedsSummary = %q, want %q", c.m, got, c.summary)
 		}
 	}
 }

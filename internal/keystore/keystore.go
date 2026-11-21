@@ -33,6 +33,23 @@ func (m Mode) Has2FA() bool { return m == ModePassword2FA || m == ModePIN2FA }
 // KEK, PRD 6.3.
 func (m Mode) HasDeviceSecret() bool { return m == ModePIN || m == ModePIN2FA }
 
+// NeedsSummary is a one-line unlock hint for this file's mode, shown when the
+// user opens a .pbx to decrypt.
+func (m Mode) NeedsSummary() string {
+	switch m {
+	case ModePassword:
+		return "This file needs a passphrase."
+	case ModePIN:
+		return "This file needs a PIN."
+	case ModePassword2FA:
+		return "This file needs a passphrase and a 2FA code."
+	case ModePIN2FA:
+		return "This file needs a PIN and a 2FA code."
+	default:
+		return "This file needs unlock credentials."
+	}
+}
+
 // Argon2Params are the Argon2id parameters, PRD section 7.1 step 3. They live
 // in the keystore so a later version can raise them, PRD section 7.2.
 type Argon2Params struct {
