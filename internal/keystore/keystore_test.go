@@ -223,4 +223,20 @@ func TestModeHelpers(t *testing.T) {
 			t.Fatalf("mode %q NeedsSummary = %q, want %q", c.m, got, c.summary)
 		}
 	}
+	msg := FormatEncryptSuccess("/tmp/a.txt.pbx", ModePIN, false, "AGE-SECRET-KEY-1TEST")
+	for _, want := range []string{
+		"Done. File encrypted successfully.",
+		"Saved at: /tmp/a.txt.pbx",
+		"original file is still in the folder",
+		"encrypted using a PIN",
+		"AGE-SECRET-KEY-1TEST",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("encrypt success missing %q in %q", want, msg)
+		}
+	}
+	dec := FormatDecryptSuccess("/tmp/a.txt")
+	if !strings.Contains(dec, "Done. File decrypted successfully.") || !strings.Contains(dec, "Saved at: /tmp/a.txt") {
+		t.Fatalf("decrypt success = %q", dec)
+	}
 }

@@ -35,7 +35,7 @@ if [ -n "$VERSION" ]; then
 else
   # Fixed asset name: the latest release redirects to it without an API call.
   curl -fsSLO "https://github.com/$REPO/releases/latest/download/checksums.txt"
-  archive=$(grep -o "pillarbox_[0-9.]*_${os}_${arch}\.tar\.gz" checksums.txt | head -1)
+  archive=$(grep -o "pillarbox_[0-9.]*_${os}_${arch}\.tar.gz" checksums.txt | head -1)
   if [ -z "$archive" ]; then
     echo "pillarbox: no release asset for ${os}_${arch}" >&2
     exit 1
@@ -55,8 +55,23 @@ mkdir -p "$INSTALL_DIR"
 mv pillarbox "$INSTALL_DIR/pillarbox"
 chmod 755 "$INSTALL_DIR/pillarbox"
 
-echo "pillarbox $VERSION installed to $INSTALL_DIR/pillarbox"
+echo ""
+echo "Pillarbox $VERSION is installed on your machine."
+echo ""
+echo "  $INSTALL_DIR/pillarbox"
+echo ""
+echo "Open your terminal and run:"
+echo ""
+echo "  pillarbox"
+echo ""
+echo "Enjoy."
+echo ""
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
-  *) echo "note: $INSTALL_DIR is not on your PATH" >&2 ;;
+  *)
+    echo "Note: $INSTALL_DIR is not on your PATH."
+    echo "Add it with:"
+    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    echo ""
+    ;;
 esac

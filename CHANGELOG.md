@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-21
+
+### Changed
+
+- Clearer success copy after encrypt and decrypt (path plus what credentials that file needs; original-file keep/remove note).
+- Installer curl-pipe ends with a short welcome: Pillarbox is installed — run `pillarbox`. Enjoy.
+
 ## [0.3.4] - 2026-11-21
 
 ### Added

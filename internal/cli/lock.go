@@ -6,6 +6,7 @@ import (
 	"filippo.io/age"
 	"github.com/spf13/cobra"
 
+	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
 	"github.com/leonardobetti/pillarbox-cli/internal/vault"
 )
 
@@ -65,8 +66,7 @@ func (d *Deps) runLock(path, out string, removeOriginal, force bool) error {
 		return mapVaultErr(err)
 	}
 	if !d.opts.quiet {
-		d.println(locked)
-		d.printf("recovery key for this file (shown once): %s\n", recovery)
+		d.printf("%s", keystore.FormatEncryptSuccess(locked, mode, removeOriginal, recovery))
 	}
 	return nil
 }
@@ -101,7 +101,7 @@ func (d *Deps) runUnlock(src, out string, force bool) error {
 		return mapVaultErr(err)
 	}
 	if !d.opts.quiet {
-		d.println(dst)
+		d.printf("%s", keystore.FormatDecryptSuccess(dst))
 	}
 	return nil
 }

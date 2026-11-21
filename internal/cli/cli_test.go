@@ -101,7 +101,16 @@ func (e *env) setupLocked(t *testing.T, mode, secret string) {
 	if code != ExitOK {
 		t.Fatalf("lock: exit %d, stderr %q", code, errOut)
 	}
-	e.pbx = strings.TrimSpace(strings.Split(out, "\n")[0])
+	e.pbx = ""
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(strings.TrimSpace(line), "Saved at: "); ok {
+			e.pbx = p
+			break
+		}
+	}
+	if e.pbx == "" {
+		t.Fatalf("lock stdout missing Saved at: path: %q", out)
+	}
 }
 
 func makeFile(t *testing.T, e *env, name, content string) string {
@@ -163,9 +172,18 @@ func TestCommandsTable(t *testing.T) {
 			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui", "--secret-stdin"} },
 			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
-			wantOut:  ".pbx",
+			wantOut:  "Done. File encrypted successfully.",
 			check: func(t *testing.T, e *env, out, errOut string) {
-				dst := strings.TrimSpace(strings.Split(out, "\n")[0])
+				dst := ""
+				for _, line := range strings.Split(out, "\n") {
+					if p, ok := strings.CutPrefix(strings.TrimSpace(line), "Saved at: "); ok {
+						dst = p
+						break
+					}
+				}
+				if dst == "" {
+					t.Fatalf("missing Saved at: in %q", out)
+				}
 				b, err := os.ReadFile(dst)
 				if err != nil {
 					t.Fatalf("no output file: %v", err)
@@ -175,6 +193,9 @@ func TestCommandsTable(t *testing.T) {
 				}
 				if _, err := os.Stat(dst + ".key"); !os.IsNotExist(err) {
 					t.Fatal("sidecar .key file should not exist anymore")
+				}
+				if !strings.Contains(out, "encrypted using a passphrase") {
+					t.Fatalf("missing mode hint in %q", out)
 				}
 			},
 		},
