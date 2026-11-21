@@ -138,7 +138,6 @@ func newRoot(d *Deps) *cobra.Command {
 	cmd.PersistentFlags().StringVar(&d.opts.totp, "totp", "", "TOTP code for 2FA modes")
 	cmd.PersistentFlags().BoolVar(&d.opts.quiet, "quiet", false, "suppress informational output")
 	cmd.AddCommand(
-		newInitCmd(d),
 		newLockCmd(d),
 		newUnlockCmd(d),
 		newStatusCmd(d),
@@ -160,7 +159,7 @@ func (d *Deps) runRoot(cmd *cobra.Command) error {
 		}
 	}
 	if err == nil && !exists {
-		return &exitError{ExitKeystore, "no keystore; run pillarbox init"}
+		return &exitError{ExitKeystore, "no keystore; run pillarbox to set up"}
 	}
 	if d.interactive() {
 		if _, terr := tui.RunHome(d.tuiDeps()); terr != nil {
@@ -227,7 +226,7 @@ func (d *Deps) loadKeystore() (*keystore.Keystore, error) {
 		}
 	}
 	if errors.Is(err, keystore.ErrNotFound) || errors.Is(err, keystore.ErrInvalid) {
-		return nil, &exitError{ExitKeystore, "keystore missing or invalid; run pillarbox init"}
+		return nil, &exitError{ExitKeystore, "keystore missing or invalid; run pillarbox to set up"}
 	}
 	if err != nil {
 		return nil, &exitError{ExitOther, "cannot read keystore"}

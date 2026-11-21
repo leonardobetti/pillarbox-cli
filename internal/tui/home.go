@@ -93,7 +93,7 @@ func (m *Home) reloadKeystore() {
 	ks, err := m.deps.Store.Load()
 	if err != nil {
 		m.ks = nil
-		m.ksErr = "keystore missing or invalid; run pillarbox init"
+		m.ksErr = "keystore missing or invalid; run pillarbox to set up"
 		return
 	}
 	m.ks = ks

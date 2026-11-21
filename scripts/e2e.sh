@@ -12,6 +12,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 BIN="$WORK/pillarbox"
 TOTPCODE="$WORK/totpcode"
+MKKS="$WORK/mkkeystore"
 
 # Fixed RFC 6238 test seed (base32 of "12345678901234567890"). Only used with
 # the PILLARBOX_E2E_TOTP_SEED test hook so the script can compute a valid code.
@@ -61,9 +62,10 @@ pb_stdin() {
   ( printf '%s\n' "$secret" | pb_env "$run" "$BIN" --no-tui --secret-stdin "$@" )
 }
 
-say "building pillarbox and totpcode"
+say "building pillarbox, totpcode and mkkeystore"
 ( cd "$ROOT" && CGO_ENABLED=0 go build -o "$BIN" ./cmd/pillarbox )
 ( cd "$ROOT" && CGO_ENABLED=0 go build -o "$TOTPCODE" ./scripts/totpcode )
+( cd "$ROOT" && CGO_ENABLED=0 go build -o "$MKKS" ./scripts/mkkeystore )
 
 # Shared fixtures.
 FIX="$WORK/fixtures"
@@ -98,36 +100,27 @@ mode_has2fa() {
   esac
 }
 
-# totp_args <run> <offset>: prints the flag words for a fresh code, or nothing
-# for non-2FA modes. Kept as a plain string to stay bash 3.2 safe under set -u.
-totp_args() {
-  local run="$1" off="$2"
-  if [ "$(mode_has2fa "$MODE")" = yes ]; then
-    printf '%s' "--totp $("$TOTPCODE" "$TOTP_SEED" "$off")"
-  fi
-}
-
 # run_mode <mode>: full happy path plus negative checks for one mode.
 run_mode() {
   MODE="$1"
   local run="$WORK/run-$MODE"
   mkdir -p "$run/home" "$run/data"
-  local secret wrong extra init_extra
+  local secret wrong extra
   secret="$(mode_secret "$MODE")"
   wrong="$(mode_wrong "$MODE")"
   extra=""
-  init_extra=""
   if [ "$(mode_has2fa "$MODE")" = yes ]; then
     extra="--totp $("$TOTPCODE" "$TOTP_SEED" 0)"
-    init_extra="$extra"
   fi
 
-  say "mode $MODE: init"
+  # The CLI has no init command anymore; the mkkeystore helper seeds the
+  # keystore non-interactively for the e2e run.
+  say "mode $MODE: create keystore"
   if [ "$(mode_has2fa "$MODE")" = yes ]; then
     ( printf '%s\n' "$secret" | pb_env "$run" env PILLARBOX_E2E_TOTP_SEED="$TOTP_SEED" \
-      "$BIN" --no-tui --secret-stdin $init_extra init --mode "$MODE" ) >/dev/null
+      "$MKKS" --mode "$MODE" ) >/dev/null
   else
-    pb_stdin "$run" "$secret" init --mode "$MODE" >/dev/null
+    ( printf '%s\n' "$secret" | pb_env "$run" "$MKKS" --mode "$MODE" ) >/dev/null
   fi
 
   say "mode $MODE: lock and unlock a file"

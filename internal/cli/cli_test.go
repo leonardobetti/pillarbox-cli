@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/spf13/pflag"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
@@ -70,29 +71,46 @@ func (f *fakeTOTP) Verify(seed []byte, code string, lastStep int64) (bool, int64
 	return false, 0, nil
 }
 
-func initPassword(t *testing.T, e *env) {
+// seedKeystore writes a keystore for mode directly through the core services,
+// without going through a CLI command. The init command was removed; setup
+// happens through bare pillarbox.
+func seedKeystore(t *testing.T, e *env, mode keystore.Mode, secret string) {
 	t.Helper()
-	code, _, errOut := e.run(t, testSecret+"\n", "init", "--no-tui", "--secret-stdin")
-	if code != ExitOK {
-		t.Fatalf("init: exit %d, stderr %q", code, errOut)
+	if mode.Has2FA() {
+		e.deps.TOTP = &fakeTOTP{}
+	}
+	var devSecret []byte
+	if mode.HasDeviceSecret() {
+		d, _, err := e.deps.DevStore.LoadOrCreate()
+		if err != nil {
+			t.Fatalf("LoadOrCreate: %v", err)
+		}
+		devSecret = d
+	}
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("GenerateX25519Identity: %v", err)
+	}
+	seed := bytes.Repeat([]byte{0x42}, 20)
+	ks, err := auth.NewInitializer(e.deps.KDF, e.deps.Wrapper).Initialize(
+		mode, id.Recipient().String(), []byte(id.String()), []byte(secret), devSecret, seed, keystore.DefaultArgon2Params)
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if err := e.deps.Store.Save(ks); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 }
 
-// setupLocked runs init and lock, leaving e.src and e.pbx set.
+func initPassword(t *testing.T, e *env) {
+	t.Helper()
+	seedKeystore(t, e, keystore.ModePassword, testSecret)
+}
+
+// setupLocked seeds a keystore and locks a file, leaving e.src and e.pbx set.
 func (e *env) setupLocked(t *testing.T, mode, secret string) {
 	t.Helper()
-	args := []string{"init", "--no-tui", "--secret-stdin"}
-	if mode != "" {
-		args = append(args, "--mode", mode)
-	}
-	if keystore.Mode(mode).Has2FA() {
-		e.deps.TOTP = &fakeTOTP{}
-		args = append(args, "--totp", "123456")
-	}
-	code, _, errOut := e.run(t, secret+"\n", args...)
-	if code != ExitOK {
-		t.Fatalf("init %s: exit %d, stderr %q", mode, code, errOut)
-	}
+	seedKeystore(t, e, keystore.Mode(mode), secret)
 	e.src = makeFile(t, e, "a.txt", "hello pillarbox")
 	code, out, errOut := e.run(t, "", "lock", e.src, "--no-tui")
 	if code != ExitOK {
@@ -131,51 +149,19 @@ func TestCommandsTable(t *testing.T) {
 			name:     "status without keystore exits 5",
 			args:     func(t *testing.T, e *env) []string { return []string{"status"} },
 			wantExit: ExitKeystore,
-			wantErr:  "run pillarbox init",
+			wantErr:  "run pillarbox to set up",
 		},
 		{
-			name:     "init password via secret-stdin",
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--no-tui", "--secret-stdin"} },
-			stdin:    testSecret + "\n",
-			wantExit: ExitOK,
-			wantOut:  "recovery key",
-		},
-		{
-			name: "init invalid mode exits 2",
-			args: func(t *testing.T, e *env) []string {
-				return []string{"init", "--mode", "bogus", "--no-tui", "--secret-stdin"}
-			},
-			stdin:    testSecret + "\n",
+			name:     "init is no longer a command",
+			args:     func(t *testing.T, e *env) []string { return []string{"init"} },
 			wantExit: ExitUsage,
-			wantErr:  "invalid mode",
-		},
-		{
-			name:     "init short passphrase exits 2",
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--no-tui", "--secret-stdin"} },
-			stdin:    "short\n",
-			wantExit: ExitUsage,
-			wantErr:  "invalid secret",
-		},
-		{
-			name:     "init existing keystore without force exits 1",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--no-tui", "--secret-stdin"} },
-			stdin:    testSecret + "\n",
-			wantExit: ExitOther,
-			wantErr:  "already exists",
-		},
-		{
-			name:     "init with force overwrites",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--force", "--no-tui", "--secret-stdin"} },
-			stdin:    testSecret + "\n",
-			wantExit: ExitOK,
+			wantErr:  "unknown command",
 		},
 		{
 			name:     "lock without keystore exits 5",
 			args:     func(t *testing.T, e *env) []string { return []string{"lock", "x", "--no-tui"} },
 			wantExit: ExitKeystore,
-			wantErr:  "run pillarbox init",
+			wantErr:  "run pillarbox to set up",
 		},
 		{
 			name:     "lock missing path exits 2",
@@ -456,7 +442,7 @@ func TestHelpListsAllCommands(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("--help exit = %d, want 0", code)
 	}
-	for _, name := range []string{"init", "lock", "unlock", "status", "export-key", "config", "version"} {
+	for _, name := range []string{"lock", "unlock", "status", "export-key", "config", "version"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("--help output is missing command %q", name)
 		}
