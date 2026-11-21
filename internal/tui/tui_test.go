@@ -74,6 +74,15 @@ func waitFor(t *testing.T, tm *teatest.TestModel, a *acc, substrs ...string) {
 	}, teatest.WithDuration(10*time.Second))
 }
 
+// pickATxt moves past the parent-directory row (and cfg/ when present) onto a.txt.
+func pickATxt(tm *teatest.TestModel, hasCfg bool) {
+	tm.Send(key(tea.KeyDown)) // parent -> first entry
+	if hasCfg {
+		tm.Send(key(tea.KeyDown)) // cfg/ -> a.txt
+	}
+	tm.Send(key(tea.KeyEnter))
+}
+
 func TestOnboardingAllKeyTypes(t *testing.T) {
 	modes := []keystore.Mode{
 		keystore.ModePassword, keystore.ModePIN, keystore.ModePassword2FA, keystore.ModePIN2FA,
@@ -129,6 +138,21 @@ func TestOnboardingEscLeavesNoSettings(t *testing.T) {
 	}
 }
 
+func TestHomeLayoutShowsProposalChrome(t *testing.T) {
+	deps := testDeps(t)
+	setupSettings(t, deps, keystore.ModePassword)
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Pillarbox", tagline,
+		"Encrypt", "Decrypt", "Status", "Settings", "Help",
+		"Select a file to encrypt",
+		"Tab, ← or → to navigate", "Enter to select", "Q to quit")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+}
+
 func TestHomeMenuTabNavigation(t *testing.T) {
 	deps := testDeps(t)
 	setupSettings(t, deps, keystore.ModePassword)
@@ -138,18 +162,17 @@ func TestHomeMenuTabNavigation(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Encrypt", "Decrypt", "Settings")
+	waitFor(t, tm, a, "Select a file to encrypt")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // -> Decrypt
-	tm.Send(key(tea.KeyEnter))
-	waitFor(t, tm, a, "Decrypt — select a .pbx file")
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // -> Decrypt (content switches immediately)
+	waitFor(t, tm, a, "Select a .pbx file to decrypt")
 
-	tm.Send(key(tea.KeyEsc))
 	tm.Send(tea.KeyMsg{Type: tea.KeyShiftTab}) // -> Encrypt
-	tm.Send(key(tea.KeyEnter))
-	waitFor(t, tm, a, "Encrypt — select a file")
+	waitFor(t, tm, a, "Select a file to encrypt")
 
-	tm.Send(key(tea.KeyEsc))
+	tm.Send(key(tea.KeyRight)) // -> Decrypt via arrow
+	waitFor(t, tm, a, "Select a .pbx file to decrypt")
+
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 }
@@ -163,15 +186,11 @@ func TestHomeEncryptFileWithOwnKey(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Encrypt")
-
-	tm.Send(key(tea.KeyEnter)) // Encrypt -> picker
-	waitFor(t, tm, a, "a.txt")
-	tm.Send(key(tea.KeyDown))  // cursor: cfg/ -> a.txt
-	tm.Send(key(tea.KeyEnter)) // pick the file -> secret screen
+	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
+	pickATxt(tm, true)
 	waitFor(t, tm, a, "Secret (password)", "at least 12 characters")
 	tm.Type("correct horse battery staple")
-	tm.Send(key(tea.KeyEnter)) // -> encrypt with a fresh per-file key
+	tm.Send(key(tea.KeyEnter))
 	waitFor(t, tm, a, ".pbx")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
@@ -201,12 +220,8 @@ func TestHomeEncryptAsksKeyTypeWhenUnset(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Encrypt")
-
-	tm.Send(key(tea.KeyEnter)) // Encrypt -> picker
-	waitFor(t, tm, a, "a.txt")
-	tm.Send(key(tea.KeyDown))
-	tm.Send(key(tea.KeyEnter)) // pick file -> key type chooser
+	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
+	pickATxt(tm, false)
 	waitFor(t, tm, a, "Key type not set", "pin")
 	tm.Send(key(tea.KeyDown))  // -> pin
 	tm.Send(key(tea.KeyEnter)) // choose pin -> secret screen
@@ -233,15 +248,12 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Settings")
+	waitFor(t, tm, a, "Select a file to encrypt")
 	for i := 0; i < 3; i++ {
-		tm.Send(key(tea.KeyDown))
+		tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // Encrypt -> Decrypt -> Status -> Settings
 	}
-	tm.Send(key(tea.KeyEnter)) // open Settings
 	waitFor(t, tm, a, "Key type:", "Gate encrypt:", "a apply")
 
-	// Tab/backspace move down, arrows flip the option: several presses in a
-	// row must stay stable, one action per keypress, footer intact.
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})       // cursor -> gate-encrypt
 	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // wrap back to key type
 	tm.Send(key(tea.KeyDown))                   // cursor -> gate-encrypt
@@ -260,8 +272,8 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	if err != nil || !st.GateEncrypt {
 		t.Fatalf("gate-encrypt not persisted: %v, %+v", err, st)
 	}
-	if !bytes.Contains(a.b, []byte("ctrl+c abort")) {
-		t.Fatal("footer corrupted during settings navigation")
+	if !bytes.Contains(a.b, []byte("Q to quit")) {
+		t.Fatal("footer missing during settings navigation")
 	}
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
@@ -282,17 +294,13 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Encrypt")
-
-	tm.Send(key(tea.KeyEnter)) // Encrypt -> picker
-	waitFor(t, tm, a, "a.txt")
-	tm.Send(key(tea.KeyDown))
-	tm.Send(key(tea.KeyEnter)) // pick file -> secret screen
+	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
+	pickATxt(tm, true)
 	waitFor(t, tm, a, "Secret (password+2fa)")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter)) // -> 2FA QR screen
 
-	waitFor(t, tm, a, "█", "otpauth://")
+	waitFor(t, tm, a, "█", "Enter the 6-digit code", "Scan the QR")
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	waitFor(t, tm, a, "copied 2FA URI to clipboard")
 	if len(copied) != 1 || !strings.HasPrefix(copied[0], "otpauth://") {
