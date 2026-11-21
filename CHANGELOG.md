@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-21
+
+### Changed
+
+- Home TUI requires at least 80×40 terminal cells (~800×800px at a typical monospace font). Smaller windows show a resize hint instead of a broken layout.
+
 ## [0.3.1] - 2026-11-21
 
 ### Fixed

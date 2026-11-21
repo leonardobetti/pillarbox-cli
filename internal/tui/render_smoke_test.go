@@ -30,3 +30,24 @@ func TestHomeViewNoTornANSI(t *testing.T) {
 		t.Fatal("expected ─ underline under active tab")
 	}
 }
+
+func TestHomeResizeGate(t *testing.T) {
+	deps := testDeps(t)
+	setupSettings(t, deps, keystore.ModePassword)
+	h := NewHome(deps)
+	m, _ := h.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	h = m.(*Home)
+	v := h.View()
+	if !strings.Contains(v, "Terminal too small") || !strings.Contains(v, "800×800px") {
+		t.Fatalf("expected resize gate, got:\n%s", v)
+	}
+	m, _ = h.Update(tea.WindowSizeMsg{Width: minTermWidth, Height: minTermHeight})
+	h = m.(*Home)
+	v = h.View()
+	if strings.Contains(v, "Terminal too small") {
+		t.Fatalf("still gated after resize:\n%s", v)
+	}
+	if !strings.Contains(v, "Select a file to encrypt") {
+		t.Fatalf("expected home UI after resize:\n%s", v)
+	}
+}

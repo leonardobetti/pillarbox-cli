@@ -95,7 +95,7 @@ func TestHomeLayoutShowsProposalChrome(t *testing.T) {
 	deps := testDeps(t)
 	setupSettings(t, deps, keystore.ModePassword)
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Pillarbox", tagline,
 		"Encrypt", "Decrypt", "Status", "Settings", "Help",
@@ -113,7 +113,7 @@ func TestHomeMenuTabNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt")
 
@@ -137,7 +137,7 @@ func TestHomeEncryptFileWithOwnKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
@@ -171,7 +171,7 @@ func TestHomeEncryptAsksKeyTypeWhenUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, false)
@@ -211,7 +211,7 @@ func TestPickerHidesDotfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	if bytes.Contains(a.b, []byte(".secret")) || bytes.Contains(a.b, []byte(".hiddendir")) {
@@ -230,7 +230,7 @@ func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
@@ -296,7 +296,7 @@ func TestHomeEncryptAuthGate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	// Auth-encrypt on: opening Encrypt asks for the secret before the picker.
 	waitFor(t, tm, a, "Secret (password)")
@@ -318,7 +318,7 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	deps := testDeps(t)
 	setupSettings(t, deps, keystore.ModePassword)
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt")
 	for i := 0; i < 3; i++ {
@@ -364,7 +364,7 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
 	a := &acc{}
 	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
 	pickATxt(tm, true)
