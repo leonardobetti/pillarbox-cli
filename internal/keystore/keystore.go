@@ -2,6 +2,8 @@ package keystore
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -48,6 +50,49 @@ func (m Mode) NeedsSummary() string {
 	default:
 		return "This file needs unlock credentials."
 	}
+}
+
+// CredentialPhrase is the short “a PIN” / “a passphrase and a 2FA code” form
+// used in success copy after encrypt.
+func (m Mode) CredentialPhrase() string {
+	switch m {
+	case ModePassword:
+		return "a passphrase"
+	case ModePIN:
+		return "a PIN"
+	case ModePassword2FA:
+		return "a passphrase and a 2FA code"
+	case ModePIN2FA:
+		return "a PIN and a 2FA code"
+	default:
+		return "its unlock credentials"
+	}
+}
+
+// FormatEncryptSuccess is the human confirmation after a successful lock.
+// recovery may be empty for quiet callers; when set it is shown once.
+func FormatEncryptSuccess(lockedPath string, mode Mode, originalRemoved bool, recovery string) string {
+	var b strings.Builder
+	b.WriteString("Done. File encrypted successfully.\n")
+	fmt.Fprintf(&b, "Saved at: %s\n", lockedPath)
+	if originalRemoved {
+		b.WriteString("The original file was removed after encryption.\n")
+	} else {
+		b.WriteString("The original file is still in the folder — keep or remove it as you prefer.\n")
+	}
+	fmt.Fprintf(&b, "This file was encrypted using %s, which will be required to open it.\n",
+		mode.CredentialPhrase())
+	if recovery != "" {
+		b.WriteString("\nRecovery key (shown once):\n")
+		b.WriteString(recovery)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// FormatDecryptSuccess is the human confirmation after a successful unlock.
+func FormatDecryptSuccess(plainPath string) string {
+	return fmt.Sprintf("Done. File decrypted successfully.\nSaved at: %s\n", plainPath)
 }
 
 // Argon2Params are the Argon2id parameters, PRD section 7.1 step 3. They live

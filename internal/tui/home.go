@@ -433,7 +433,11 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 	}
 	// The TUI overwrites the original when it still exists next to the .pbx.
 	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{Force: true})
-	m.setResult(dst, err)
+	if err != nil {
+		m.setResult("", err)
+		return
+	}
+	m.setResult(keystore.FormatDecryptSuccess(dst), nil)
 }
 
 // startEncryptWithSecret runs the encrypt flow with an already collected
@@ -489,7 +493,7 @@ func (m *Home) doEncrypt(secret string, seed []byte) {
 		return
 	}
 	m.pendingSecret = ""
-	m.setResult(locked+"\nrecovery key (shown once): "+identity.String(), nil)
+	m.setResult(keystore.FormatEncryptSuccess(locked, mode, false, identity.String()), nil)
 }
 
 func (m *Home) setResult(dst string, err error) {
