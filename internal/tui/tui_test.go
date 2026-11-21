@@ -345,7 +345,7 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 
 	// Tab must leave Settings for Help, not cycle options.
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
-	waitFor(t, tm, a, "Help")
+	waitFor(t, tm, a, "Help", "Argon2id", "Leonardo Betti", "Nasser Khalil", "open source")
 	if !bytes.Contains(a.b, []byte("Q to quit")) {
 		t.Fatal("footer missing during settings navigation")
 	}
