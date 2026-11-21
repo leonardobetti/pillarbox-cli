@@ -8,30 +8,51 @@ import (
 	"strings"
 
 	"filippo.io/age"
+
+	"github.com/leonardobetti/pillarbox-cli/internal/archive"
 )
 
-// pbxExt is the default output extension, PRD section 6.1.
+// pbxExt is the default output extension for single files, PRD section 6.1.
 const pbxExt = ".pbx"
 
-// ageVault is the stateless Vault implementation backed by filippo.io/age.
-type ageVault struct{}
+// ageVault is the Vault implementation backed by filippo.io/age, with
+// internal/archive streaming folders through tar.
+type ageVault struct {
+	w archive.Writer
+	x archive.Extractor
+}
 
-// New returns the Vault implementation for single files. Folders land with
-// internal/archive and reuse the same temp-plus-rename write below.
-func New() Vault { return ageVault{} }
+// New returns the Vault implementation.
+func New() Vault {
+	return ageVault{w: archive.NewWriter(), x: archive.NewExtractor()}
+}
 
-// Lock encrypts a single file, PRD 7.3. The plaintext streams through
-// age.Encrypt into a temp file in the output directory; only a clean close
-// is fsynced and renamed onto the final name, so a failure leaves no partial
-// output.
-func (ageVault) Lock(src string, recipient string, opts LockOptions) (string, error) {
+// Lock encrypts src, a single file or a folder, PRD 7.3. The plaintext
+// streams through age.Encrypt into a temp file in the output directory; only
+// a clean close is fsynced and renamed onto the final name, so a failure
+// leaves no partial output.
+func (v ageVault) Lock(src string, recipient string, opts LockOptions) (string, error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", err
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("folders are not supported yet: %s", src)
+		return v.lockFolder(src, recipient, opts)
 	}
+	return v.lockFile(src, recipient, opts)
+}
+
+// Unlock decrypts src, a .pbx single file or a .tar.pbx folder archive, PRD
+// 7.4. Every failure from age (wrong identity, flipped, truncated or
+// appended bytes) is wrapped as ErrIntegrity and partial output is removed.
+func (v ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) (string, error) {
+	if strings.HasSuffix(src, tarPbxExt) {
+		return v.unlockFolder(src, identity, opts)
+	}
+	return v.unlockFile(src, identity, opts)
+}
+
+func (v ageVault) lockFile(src, recipient string, opts LockOptions) (string, error) {
 	r, err := parseRecipient(recipient)
 	if err != nil {
 		return "", err
@@ -40,10 +61,8 @@ func (ageVault) Lock(src string, recipient string, opts LockOptions) (string, er
 	if dst == "" {
 		dst = src + pbxExt
 	}
-	if !opts.Force {
-		if _, err := os.Stat(dst); err == nil {
-			return "", fmt.Errorf("output exists: %s (use --force to overwrite)", dst)
-		}
+	if err := checkOutputFree(dst, opts.Force); err != nil {
+		return "", err
 	}
 
 	in, err := os.Open(src)
@@ -76,10 +95,7 @@ func (ageVault) Lock(src string, recipient string, opts LockOptions) (string, er
 	return dst, nil
 }
 
-// Unlock decrypts a single .pbx file, PRD 7.4 steps 3-4. Every failure from
-// age (wrong identity, flipped, truncated or appended bytes) is wrapped as
-// ErrIntegrity and the partial output is removed.
-func (ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) (string, error) {
+func (v ageVault) unlockFile(src string, identity age.Identity, opts UnlockOptions) (string, error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return "", err
@@ -93,10 +109,8 @@ func (ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) (s
 		}
 		dst = strings.TrimSuffix(src, pbxExt)
 	}
-	if !opts.Force {
-		if _, err := os.Stat(dst); err == nil {
-			return "", fmt.Errorf("output exists: %s (use --force to overwrite)", dst)
-		}
+	if err := checkOutputFree(dst, opts.Force); err != nil {
+		return "", err
 	}
 
 	err = writeAtomic(dst, func(w io.Writer) error {
@@ -111,6 +125,18 @@ func (ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) (s
 		return "", fmt.Errorf("%w: %v", ErrIntegrity, err)
 	}
 	return dst, nil
+}
+
+// checkOutputFree refuses to overwrite an existing output unless force is
+// set, PRD 7.4 step 3.
+func checkOutputFree(dst string, force bool) error {
+	if force {
+		return nil
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("output exists: %s (use --force to overwrite)", dst)
+	}
+	return nil
 }
 
 // parseRecipient parses a keystore recipient string into an age.Recipient.

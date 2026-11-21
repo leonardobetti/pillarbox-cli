@@ -55,7 +55,8 @@ a fake `SecretPrompter` and a fake `Vault`.
 ```
 cli, tui → auth, keystore, vault
 auth     → keystore
-vault    → filippo.io/age
+vault    → archive, filippo.io/age
+archive  → stdlib only
 keystore → stdlib only
 ```
 
@@ -147,6 +148,5 @@ needed to build or test cli and tui.
 
 ## Not in this change
 
-Implementations of the interfaces above, the internal/archive interface
-(vault's tar path checks, PRD section 12), the TUI models, and copying
-`prd.md` to `docs/PRD.md`.
+Implementations of the remaining interfaces above (keystore.Store, auth),
+the TUI models, and copying `prd.md` to `docs/PRD.md`.

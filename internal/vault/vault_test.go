@@ -298,14 +298,6 @@ func TestLockRemoveOriginal(t *testing.T) {
 	}
 }
 
-func TestLockDirectoryFails(t *testing.T) {
-	v := New()
-	id := newIdentity(t)
-	if _, err := v.Lock(t.TempDir(), id.Recipient().String(), LockOptions{}); err == nil {
-		t.Fatal("Lock on a directory succeeded, want error until archive support lands")
-	}
-}
-
 func TestUnlockDefaultNameStripsPbx(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "note.txt")
