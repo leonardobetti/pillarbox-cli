@@ -326,10 +326,8 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	}
 	waitFor(t, tm, a, "Key type:", "Require authentication to encrypt: no", "a apply")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyTab})       // cursor -> auth-encrypt
-	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // wrap back to key type
 	tm.Send(key(tea.KeyDown))                   // cursor -> auth-encrypt
-	tm.Send(key(tea.KeyLeft))                   // toggle to yes
+	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // toggle to yes
 	waitFor(t, tm, a, "Require authentication to encrypt: yes")
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) // apply
 
@@ -344,6 +342,10 @@ func TestHomeSettingsStableNavigation(t *testing.T) {
 	if err != nil || !st.AuthEncrypt {
 		t.Fatalf("auth-encrypt not persisted: %v, %+v", err, st)
 	}
+
+	// Tab must leave Settings for Help, not cycle options.
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	waitFor(t, tm, a, "Help")
 	if !bytes.Contains(a.b, []byte("Q to quit")) {
 		t.Fatal("footer missing during settings navigation")
 	}

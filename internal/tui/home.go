@@ -43,7 +43,7 @@ const tagline = "Pillarbox encrypts and decrypts files from the terminal."
 
 const footerKeys = "Tab, ← or → to navigate  Enter to select  Q to quit  Backspace to change"
 
-const helpText = "Tab / ← / → switch tabs • ↑/↓ move in the box • enter select • backspace parent or back • a apply (settings) • q quit • ctrl+c abort"
+const helpText = "Tab / ← / → switch tabs • ↑/↓ move in the box • enter select • backspace toggle setting or parent dir • a apply (settings) • q quit • ctrl+c abort"
 
 type promptDoneMsg struct {
 	action string
@@ -258,11 +258,11 @@ func (m *Home) canSwitchTab(msg tea.KeyMsg) bool {
 	}
 	switch msg.Type {
 	case tea.KeyTab, tea.KeyShiftTab:
-		// In Settings, Tab moves between options; use ←/→ for tabs there.
-		return m.screen != homeSettings
+		// Tab always moves the top menu, including leaving Settings → Help.
+		return true
 	case tea.KeyLeft, tea.KeyRight:
-		// Settings uses ←/→ to toggle the selected option.
-		return m.screen != homeSettings && m.screen != homeChooser
+		// Chooser keeps ←/→ for its list; elsewhere they switch tabs.
+		return m.screen != homeChooser
 	}
 	return false
 }
@@ -317,17 +317,16 @@ func (m *Home) returnToTab() {
 	m.activateTab()
 }
 
-// updateSettings is a stable option list: one keypress, one action, no loop.
-// up/down/tab/backspace move the cursor, left/right flip the current option,
-// a applies and persists, esc/q leave.
+// updateSettings: ↑/↓ move the cursor, backspace toggles the current option,
+// a applies. Tab/←/→ are handled by canSwitchTab so they leave for Help/etc.
 func (m *Home) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	const n = 2
 	switch msg.String() {
-	case "up", "shift+tab":
+	case "up", "k":
 		m.setCursor = (m.setCursor - 1 + n) % n
-	case "down", "tab", "backspace":
+	case "down", "j":
 		m.setCursor = (m.setCursor + 1) % n
-	case "left", "right", "h", "l", "space":
+	case "backspace", " ", "enter":
 		m.toggleSetting(m.setCursor)
 	case "a":
 		if err := m.deps.Settings.Save(m.settings); err != nil {
@@ -656,7 +655,7 @@ func (m *Home) contentBody(innerH int) string {
 			}
 			b.WriteString(marker + line + "\n")
 		}
-		b.WriteString("\n" + m.th.dim.Render("↑/↓/tab move • ←/→ toggle • a apply • backspace cycle"))
+		b.WriteString("\n" + m.th.dim.Render("↑/↓ move • backspace toggle • a apply • tab next section"))
 		return b.String()
 	case homeStatus:
 		return "Status\n\n" + m.statusText
