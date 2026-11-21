@@ -32,6 +32,9 @@ type KDF interface {
 // DeviceSecretStore owns <config>/pillarbox/device.key, PRD section 6.3:
 // 32 random bytes, mode 0600, created on first PIN-mode init.
 type DeviceSecretStore interface {
+	// Load reads the existing device secret; it fails when the file is
+	// missing or has the wrong length.
+	Load() ([]byte, error)
 	LoadOrCreate() (secret []byte, created bool, err error)
 }
 
@@ -51,4 +54,11 @@ type TOTP interface {
 // ErrAuth and says nothing about which factor failed.
 type Authenticator interface {
 	Authenticate(ks *keystore.Keystore, secret []byte, totpCode string) (identity []byte, newTOTPStep int64, err error)
+}
+
+// Initializer builds a new keystore, PRD 7.1: it derives the KEK from the
+// secret and wraps the identity (and the TOTP seed for 2FA modes) under it.
+// identity is the raw age secret key bytes; it is never stored in the clear.
+type Initializer interface {
+	Initialize(mode keystore.Mode, recipient string, identity, secret, deviceSecret, totpSeed []byte, params keystore.Argon2Params) (*keystore.Keystore, error)
 }
