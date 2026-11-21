@@ -217,7 +217,7 @@ func (p *Picker) ContentView(maxRows int) string {
 	for i := start; i < n && i < start+listRows; i++ {
 		label := p.rowLabel(i)
 		if i == p.cursor {
-			b.WriteString("> " + label + "\n")
+			b.WriteString("> " + p.th.selected.Render(label) + "\n")
 		} else {
 			b.WriteString("  " + label + "\n")
 		}
@@ -255,8 +255,8 @@ func (p *Picker) View() string {
 	b.WriteString(p.ContentView(maxRows))
 	b.WriteString("\n")
 	if p.showHelp {
-		b.WriteString("\n" + p.th.dim.Render("↑/↓ move • enter select • backspace parent • / filter • ? help • esc back") + "\n")
+		b.WriteString("\n" + renderKeys(p.th, "{↑}/{↓} move • {Enter} select • {Backspace} parent • {/} filter • {?} help • {Esc} back") + "\n")
 	}
-	b.WriteString("\n" + p.th.dim.Render("esc back • ctrl+c quit"))
+	b.WriteString("\n" + renderKeys(p.th, "{Esc} back • {Ctrl+C} quit"))
 	return fit(b.String(), p.width, p.height)
 }

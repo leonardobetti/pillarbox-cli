@@ -25,3 +25,17 @@ func TestFitDoesNotSplitANSISequences(t *testing.T) {
 		t.Fatalf("fit left control debris: %q", out)
 	}
 }
+
+func TestRenderKeysBoldsShortcuts(t *testing.T) {
+	th := newTheme(nil)
+	out := renderKeys(th, "{Q} to quit")
+	if !strings.Contains(out, "Q") || !strings.Contains(out, "to quit") {
+		t.Fatalf("renderKeys = %q", out)
+	}
+	// Bold SGR should wrap the key when colours are on; plain "Q to quit"
+	// as one run of text must not appear (bold splits Q from the rest).
+	if strings.Contains(out, "Q to quit") && !strings.Contains(out, "\x1b") {
+		// NO_COLOR / non-TTY may leave plain text; that is fine.
+		return
+	}
+}

@@ -31,6 +31,8 @@ var newRenderer = func(w io.Writer) *lipgloss.Renderer {
 type theme struct {
 	title     lipgloss.Style
 	dim       lipgloss.Style
+	key       lipgloss.Style // dim colour, bold — shortcut glyphs in footers
+	selected  lipgloss.Style // bold focus row in lists
 	errS      lipgloss.Style
 	ok        lipgloss.Style
 	tab       lipgloss.Style
@@ -41,9 +43,12 @@ type theme struct {
 
 func newTheme(w io.Writer) theme {
 	r := newRenderer(w)
+	dimColor := lipgloss.Color("8")
 	return theme{
 		title:     r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
-		dim:       r.NewStyle().Foreground(lipgloss.Color("8")),
+		dim:       r.NewStyle().Foreground(dimColor),
+		key:       r.NewStyle().Bold(true).Foreground(dimColor),
+		selected:  r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
 		errS:      r.NewStyle().Foreground(lipgloss.Color("9")),
 		ok:        r.NewStyle().Foreground(lipgloss.Color("10")),
 		tab:       r.NewStyle().Foreground(lipgloss.Color("15")),
@@ -53,6 +58,30 @@ func newTheme(w io.Writer) theme {
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(accentColor).
 			Padding(0, 1),
+	}
+}
+
+// renderKeys styles {Key} markers as bold shortcuts in dim help text.
+// Example: "{Q} to quit" → bold Q, dim " to quit".
+func renderKeys(th theme, s string) string {
+	var b strings.Builder
+	for {
+		i := strings.IndexByte(s, '{')
+		if i < 0 {
+			b.WriteString(th.dim.Render(s))
+			return b.String()
+		}
+		if i > 0 {
+			b.WriteString(th.dim.Render(s[:i]))
+		}
+		rest := s[i+1:]
+		j := strings.IndexByte(rest, '}')
+		if j < 0 {
+			b.WriteString(th.dim.Render(s[i:]))
+			return b.String()
+		}
+		b.WriteString(th.key.Render(rest[:j]))
+		s = rest[j+1:]
 	}
 }
 

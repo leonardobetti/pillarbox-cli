@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-21
+
+### Changed
+
+- Keyboard shortcuts in footers/help render the key glyphs in bold (same dim colour).
+- Focused picker (and Settings) rows are bold as well as prefixed with `>`.
+
+### Removed
+
+- `prd.md` and `AGENTS.md` from the repository.
+
 ## [0.3.7] - 2026-11-21
 
 ### Fixed
