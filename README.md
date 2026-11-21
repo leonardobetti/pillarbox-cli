@@ -71,6 +71,10 @@ The recovery key is an `age` secret key. With it, the stock `age` tool decrypts 
    age -d -i key.txt file.pbx > file
    ```
 
+## Keys
+
+Every screen shows its keys in the footer. In the menus: up/down arrows or Tab to navigate, Enter to select, Esc to go back, Q to quit, Ctrl+C to abort. In settings: Backspace flips the switch, A applies. In onboarding: Tab moves between fields.
+
 ## Commands
 
 | Command | What it does |

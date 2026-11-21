@@ -379,3 +379,44 @@ func TestOnboardingSecretScreenShowsRules(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	tm.WaitFinished(t)
 }
+
+func TestHomeSettingsToggleWithBackspaceAndApply(t *testing.T) {
+	deps := testDeps(t)
+	setupKeystore(t, deps, keystore.ModePassword)
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Encrypt", "Settings")
+
+	// Navigate to Settings with arrows, open it.
+	for i := 0; i < 3; i++ {
+		tm.Send(key(tea.KeyDown))
+	}
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "gate-encrypt", "backspace toggle", "a apply")
+
+	// Backspace flips the switch, A applies and returns to the menu.
+	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace})
+	waitFor(t, tm, a, "gate-encrypt): yes")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+
+	// The menu redraw looks the same as before, so poll the keystore until
+	// the A keypress has been processed and persisted.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if ks, err := deps.Store.Load(); err == nil && ks.Policy.GateEncrypt {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	ks, err := deps.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ks.Policy.GateEncrypt {
+		t.Fatal("gate-encrypt was not persisted as true after A")
+	}
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+}

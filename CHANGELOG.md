@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The secret screen and interactive prompts now state the secret rules for the chosen mode, with the security reason for each rule, before any input is required.
 
+### Changed
+
+- Unified key map shown in every footer: arrows or Tab navigate, Backspace flips the settings switch, A applies, Esc goes back, Q quits. The home settings toggle no longer uses a form widget.
+
 ### Removed
 
 - The `pillarbox init` command. Setup now happens only through bare `pillarbox`, which starts onboarding when no keystore exists.

@@ -142,12 +142,20 @@ func (m *Onboarding) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch m.screen {
 	case screenWelcome:
-		if k, ok := msg.(tea.KeyMsg); ok && (k.Type == tea.KeyEnter || k.Type == tea.KeySpace) {
-			m.screen = screenMode
+		if k, ok := msg.(tea.KeyMsg); ok {
+			if k.Type == tea.KeyEnter || k.Type == tea.KeySpace {
+				m.screen = screenMode
+			}
+			if k.String() == "q" {
+				return m, tea.Quit
+			}
 		}
 	case screenMode:
 		var cmd tea.Cmd
 		m.modeList, cmd = m.modeList.Update(msg)
+		if k, ok := msg.(tea.KeyMsg); ok && k.String() == "q" {
+			return m, tea.Quit
+		}
 		if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyEnter {
 			if it, ok := m.modeList.SelectedItem().(modeItem); ok {
 				m.mode = keystore.Mode(it)
@@ -368,7 +376,7 @@ func (m *Onboarding) View() string {
 	if m.errMsg != "" {
 		b.WriteString("\n" + m.th.errS.Render(m.errMsg) + "\n")
 	}
-	footer := "enter continue • tab next field • esc back • ctrl+c abort"
+	footer := "↑/↓ or tab navigate • enter continue • esc back • q quit • ctrl+c abort"
 	if m.screen == screen2FA {
 		footer = "enter continue • esc back • ctrl+c copy 2fa uri"
 	}

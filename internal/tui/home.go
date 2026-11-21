@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 
 	"github.com/leonardobetti/pillarbox-cli/internal/auth"
 	"github.com/leonardobetti/pillarbox-cli/internal/keystore"
@@ -58,15 +57,14 @@ type Home struct {
 	prompt   *secretPrompt
 	identity []byte
 
-	statusText   string
-	settingsForm *huh.Form
-	gateVal      bool
+	statusText string
+	gateVal    bool
 
 	result      string
 	resultIsErr bool
 }
 
-const helpText = "↑/↓ or k/j move • tab/shift+tab next/previous • ←/→ or h/l parent/enter folder • enter select • esc back • / filter • ? help • q quit • ctrl+c abort"
+const helpText = "↑/↓ or tab navigate • backspace toggle switch • a apply • enter select • esc back • q quit • ctrl+c abort"
 
 func NewHome(d *Deps) *Home {
 	th := newTheme(os.Stdout)
@@ -158,19 +156,24 @@ func (m *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		case homeSettings:
-			updated, cmd := m.settingsForm.Update(msg)
-			if f, ok := updated.(*huh.Form); ok {
-				m.settingsForm = f
-			}
-			if m.settingsForm.State == huh.StateCompleted {
+			// The settings toggle answers to backspace (flip the switch)
+			// and a (apply), plus esc back and q quit.
+			switch msg.String() {
+			case "backspace", "left", "right", "h", "l", "space":
+				m.gateVal = !m.gateVal
+				return m, nil
+			case "a":
 				m.ks.Policy.GateEncrypt = m.gateVal
 				if err := m.deps.Store.Save(m.ks); err != nil {
 					m.setResult("", err)
 					return m, nil
 				}
 				m.screen = homeMenu
+				return m, nil
+			case "q":
+				return m, tea.Quit
 			}
-			return m, cmd
+			return m, nil
 		case homeStatus, homeHelp, homeResult:
 			m.screen = homeMenu
 			return m, nil
@@ -229,14 +232,8 @@ func (m *Home) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.gateVal = m.ks.Policy.GateEncrypt
-		m.settingsForm = huh.NewForm(huh.NewGroup(
-			huh.NewConfirm().
-				Title("Require authentication to encrypt (gate-encrypt)?").
-				Affirmative("Yes").Negative("No").
-				Value(&m.gateVal),
-		))
 		m.screen = homeSettings
-		return m, m.settingsForm.Init()
+		return m, nil
 	case "Help":
 		m.screen = homeHelp
 	}
@@ -305,7 +302,7 @@ func (m *Home) View() string {
 	switch m.screen {
 	case homeMenu:
 		b.WriteString(m.menu.View())
-		b.WriteString("\n" + m.th.dim.Render("enter select • / filter • q quit • esc quit"))
+		b.WriteString("\n" + m.th.dim.Render("↑/↓ or tab navigate • enter select • esc back • q quit • ctrl+c abort"))
 	case homePicker:
 		return m.picker.View()
 	case homeSecret:
@@ -314,7 +311,13 @@ func (m *Home) View() string {
 		b.WriteString(m.th.title.Render("Status") + "\n\n" + m.statusText + "\n")
 		b.WriteString("\n" + m.th.dim.Render("any key back"))
 	case homeSettings:
-		b.WriteString(m.settingsForm.View())
+		toggle := "no"
+		if m.gateVal {
+			toggle = "yes"
+		}
+		b.WriteString(m.th.title.Render("Settings"))
+		b.WriteString("\n\nRequire authentication to encrypt (gate-encrypt): " + toggle + "\n")
+		b.WriteString("\n" + m.th.dim.Render("backspace toggle • a apply • esc back • q quit • ctrl+c abort"))
 	case homeHelp:
 		b.WriteString(m.th.title.Render("Keys") + "\n\n" + helpText + "\n")
 		b.WriteString("\n" + m.th.dim.Render("any key back"))
