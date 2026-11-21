@@ -29,7 +29,7 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		dir: dir,
 		deps: &Deps{
-			Store:    keystore.NewStore(filepath.Join(dir, "cfg", "keystore.json")),
+			Settings: keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
 			Wrapper:  keystore.NewWrapper(),
 			KDF:      auth.NewKDF(),
 			TOTP:     auth.NewTOTP(),
@@ -70,35 +70,38 @@ func (f *fakeTOTP) Verify(seed []byte, code string, lastStep int64) (bool, int64
 	return false, 0, nil
 }
 
-func initPassword(t *testing.T, e *env) {
+// seedSettings writes the settings file with the given key type.
+func seedSettings(t *testing.T, e *env, mode keystore.Mode) {
 	t.Helper()
-	code, _, errOut := e.run(t, testSecret+"\n", "init", "--no-tui", "--secret-stdin")
-	if code != ExitOK {
-		t.Fatalf("init: exit %d, stderr %q", code, errOut)
+	if err := e.deps.Settings.Save(&keystore.Settings{KeyType: mode}); err != nil {
+		t.Fatalf("Save settings: %v", err)
 	}
 }
 
-// setupLocked runs init and lock, leaving e.src and e.pbx set.
+func initPassword(t *testing.T, e *env) {
+	t.Helper()
+	seedSettings(t, e, keystore.ModePassword)
+}
+
+// setupLocked configures the key type and locks a file with its own key,
+// leaving e.src and e.pbx set.
 func (e *env) setupLocked(t *testing.T, mode, secret string) {
 	t.Helper()
-	args := []string{"init", "--no-tui", "--secret-stdin"}
-	if mode != "" {
-		args = append(args, "--mode", mode)
-	}
-	if keystore.Mode(mode).Has2FA() {
+	m := keystore.Mode(mode)
+	seedSettings(t, e, m)
+	if m.Has2FA() {
 		e.deps.TOTP = &fakeTOTP{}
-		args = append(args, "--totp", "123456")
-	}
-	code, _, errOut := e.run(t, secret+"\n", args...)
-	if code != ExitOK {
-		t.Fatalf("init %s: exit %d, stderr %q", mode, code, errOut)
 	}
 	e.src = makeFile(t, e, "a.txt", "hello pillarbox")
-	code, out, errOut := e.run(t, "", "lock", e.src, "--no-tui")
+	args := []string{"lock", e.src, "--no-tui", "--secret-stdin"}
+	if m.Has2FA() {
+		args = append(args, "--totp", "123456")
+	}
+	code, out, errOut := e.run(t, secret+"\n", args...)
 	if code != ExitOK {
 		t.Fatalf("lock: exit %d, stderr %q", code, errOut)
 	}
-	e.pbx = strings.TrimSpace(out)
+	e.pbx = strings.TrimSpace(strings.Split(out, "\n")[0])
 }
 
 func makeFile(t *testing.T, e *env, name, content string) string {
@@ -128,54 +131,22 @@ func TestCommandsTable(t *testing.T) {
 			wantOut:  "pillarbox version",
 		},
 		{
-			name:     "status without keystore exits 5",
+			name:     "status without settings shows not set",
 			args:     func(t *testing.T, e *env) []string { return []string{"status"} },
-			wantExit: ExitKeystore,
-			wantErr:  "run pillarbox init",
-		},
-		{
-			name:     "init password via secret-stdin",
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--no-tui", "--secret-stdin"} },
-			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
-			wantOut:  "recovery key",
+			wantOut:  "not set",
 		},
 		{
-			name: "init invalid mode exits 2",
-			args: func(t *testing.T, e *env) []string {
-				return []string{"init", "--mode", "bogus", "--no-tui", "--secret-stdin"}
-			},
-			stdin:    testSecret + "\n",
+			name:     "init is no longer a command",
+			args:     func(t *testing.T, e *env) []string { return []string{"init"} },
 			wantExit: ExitUsage,
-			wantErr:  "invalid mode",
+			wantErr:  "unknown command",
 		},
 		{
-			name:     "init short passphrase exits 2",
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--no-tui", "--secret-stdin"} },
-			stdin:    "short\n",
-			wantExit: ExitUsage,
-			wantErr:  "invalid secret",
-		},
-		{
-			name:     "init existing keystore without force exits 1",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--no-tui", "--secret-stdin"} },
-			stdin:    testSecret + "\n",
-			wantExit: ExitOther,
-			wantErr:  "already exists",
-		},
-		{
-			name:     "init with force overwrites",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"init", "--force", "--no-tui", "--secret-stdin"} },
-			stdin:    testSecret + "\n",
-			wantExit: ExitOK,
-		},
-		{
-			name:     "lock without keystore exits 5",
+			name:     "lock without key type exits 5",
 			args:     func(t *testing.T, e *env) []string { return []string{"lock", "x", "--no-tui"} },
 			wantExit: ExitKeystore,
-			wantErr:  "run pillarbox init",
+			wantErr:  "no key type configured",
 		},
 		{
 			name:     "lock missing path exits 2",
@@ -189,14 +160,34 @@ func TestCommandsTable(t *testing.T) {
 				initPassword(t, e)
 				e.src = makeFile(t, e, "a.txt", "hello")
 			},
-			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui"} },
+			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui", "--secret-stdin"} },
+			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
 			wantOut:  ".pbx",
 			check: func(t *testing.T, e *env, out, errOut string) {
-				if _, err := os.Stat(strings.TrimSpace(out)); err != nil {
+				dst := strings.TrimSpace(strings.Split(out, "\n")[0])
+				if _, err := os.Stat(dst); err != nil {
 					t.Fatalf("no output file: %v", err)
 				}
+				if _, err := os.Stat(dst + ".key"); err != nil {
+					t.Fatalf("no per-file key sidecar: %v", err)
+				}
 			},
+		},
+		{
+			name: "lock a folder exits 2",
+			setup: func(t *testing.T, e *env) {
+				initPassword(t, e)
+				if err := os.Mkdir(filepath.Join(e.dir, "adir"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			args: func(t *testing.T, e *env) []string {
+				return []string{"lock", filepath.Join(e.dir, "adir"), "--no-tui", "--secret-stdin"}
+			},
+			stdin:    testSecret + "\n",
+			wantExit: ExitUsage,
+			wantErr:  "folders are not supported",
 		},
 		{
 			name: "lock quiet prints nothing",
@@ -204,7 +195,10 @@ func TestCommandsTable(t *testing.T) {
 				initPassword(t, e)
 				e.src = makeFile(t, e, "a.txt", "hello")
 			},
-			args:     func(t *testing.T, e *env) []string { return []string{"lock", e.src, "--no-tui", "--quiet"} },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"lock", e.src, "--no-tui", "--quiet", "--secret-stdin"}
+			},
+			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
 			check: func(t *testing.T, e *env, out, errOut string) {
 				if out != "" {
@@ -287,42 +281,54 @@ func TestCommandsTable(t *testing.T) {
 			wantErr:  "--secret-stdin",
 		},
 		{
-			name:  "unlock missing file exits 1",
+			name:  "unlock without sidecar key exits 5",
 			setup: func(t *testing.T, e *env) { initPassword(t, e) },
 			args: func(t *testing.T, e *env) []string {
 				return []string{"unlock", filepath.Join(e.dir, "none.pbx"), "--no-tui", "--secret-stdin"}
 			},
 			stdin:    testSecret + "\n",
-			wantExit: ExitOther,
+			wantExit: ExitKeystore,
+			wantErr:  "no key for this file",
 		},
 		{
-			name:     "status after init",
+			name:     "status after settings",
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
 			args:     func(t *testing.T, e *env) []string { return []string{"status"} },
 			wantExit: ExitOK,
-			wantOut:  "mode: password",
+			wantOut:  "key type: password",
 		},
 		{
-			name:     "export-key prints recovery key",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"export-key", "--no-tui", "--secret-stdin"} },
+			name:  "export-key prints recovery key",
+			setup: func(t *testing.T, e *env) { e.setupLocked(t, "password", testSecret) },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"export-key", e.pbx, "--no-tui", "--secret-stdin"}
+			},
 			stdin:    testSecret + "\n",
 			wantExit: ExitOK,
 			wantOut:  "AGE-SECRET-KEY-1",
 		},
 		{
-			name:     "export-key wrong secret exits 3",
-			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
-			args:     func(t *testing.T, e *env) []string { return []string{"export-key", "--no-tui", "--secret-stdin"} },
+			name:  "export-key wrong secret exits 3",
+			setup: func(t *testing.T, e *env) { e.setupLocked(t, "password", testSecret) },
+			args: func(t *testing.T, e *env) []string {
+				return []string{"export-key", e.pbx, "--no-tui", "--secret-stdin"}
+			},
 			stdin:    "nope\n",
 			wantExit: ExitAuth,
+		},
+		{
+			name:     "config set key-type",
+			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
+			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "key-type", "pin+2fa"} },
+			wantExit: ExitOK,
+			wantOut:  "key-type set",
 		},
 		{
 			name:     "config set gate-encrypt true",
 			setup:    func(t *testing.T, e *env) { initPassword(t, e) },
 			args:     func(t *testing.T, e *env) []string { return []string{"config", "set", "gate-encrypt", "true"} },
 			wantExit: ExitOK,
-			wantOut:  "gate-encrypt = true",
+			wantOut:  "gate-encrypt set",
 		},
 		{
 			name:     "config set bad value exits 2",
@@ -456,7 +462,7 @@ func TestHelpListsAllCommands(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("--help exit = %d, want 0", code)
 	}
-	for _, name := range []string{"init", "lock", "unlock", "status", "export-key", "config", "version"} {
+	for _, name := range []string{"lock", "unlock", "status", "export-key", "config", "version"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("--help output is missing command %q", name)
 		}

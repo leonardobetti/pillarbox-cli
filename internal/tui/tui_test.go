@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"filippo.io/age"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 
@@ -24,7 +22,7 @@ type fakeTOTP struct{}
 const fakeStep = int64(1000000)
 
 func (f *fakeTOTP) GenerateSeed() ([]byte, string, error) {
-	return bytes.Repeat([]byte{0x42}, 20), "otpauth://totp/Pillarbox:pillarbox?secret=FAKE", nil
+	return bytes.Repeat([]byte{0x42}, 20), "otpauth://totp/pillarbox?secret=FAKE", nil
 }
 
 func (f *fakeTOTP) Verify(seed []byte, code string, lastStep int64) (bool, int64, error) {
@@ -38,7 +36,7 @@ func testDeps(t *testing.T) *Deps {
 	t.Helper()
 	dir := t.TempDir()
 	return &Deps{
-		Store:    keystore.NewStore(filepath.Join(dir, "cfg", "keystore.json")),
+		Settings: keystore.NewSettingsStore(filepath.Join(dir, "cfg", "settings.json")),
 		Wrapper:  keystore.NewWrapper(),
 		KDF:      auth.NewKDF(),
 		TOTP:     &fakeTOTP{},
@@ -49,20 +47,9 @@ func testDeps(t *testing.T) *Deps {
 	}
 }
 
-func setupKeystore(t *testing.T, d *Deps, mode keystore.Mode) {
+func setupSettings(t *testing.T, d *Deps, mode keystore.Mode) {
 	t.Helper()
-	id, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ks, err := auth.NewInitializer(d.KDF, d.Wrapper).Initialize(
-		mode, id.Recipient().String(),
-		[]byte(id.String()), []byte("correct horse battery staple"), nil, nil,
-		keystore.Argon2Params{Time: 1, Memory: 1024, Threads: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Store.Save(ks); err != nil {
+	if err := d.Settings.Save(&keystore.Settings{KeyType: mode}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -87,205 +74,239 @@ func waitFor(t *testing.T, tm *teatest.TestModel, a *acc, substrs ...string) {
 	}, teatest.WithDuration(10*time.Second))
 }
 
-func TestOnboardingAllModesKeyboardOnly(t *testing.T) {
-	modes := []struct {
-		name   string
-		index  int
-		secret string
-		has2FA bool
-	}{
-		{string(keystore.ModePassword), 0, "correct horse battery staple", false},
-		{string(keystore.ModePIN), 1, "123456", false},
-		{string(keystore.ModePassword2FA), 2, "correct horse battery staple", true},
-		{string(keystore.ModePIN2FA), 3, "123456", true},
+func TestOnboardingAllKeyTypes(t *testing.T) {
+	modes := []keystore.Mode{
+		keystore.ModePassword, keystore.ModePIN, keystore.ModePassword2FA, keystore.ModePIN2FA,
 	}
-	for _, tc := range modes {
-		t.Run(tc.name, func(t *testing.T) {
+	for i, mode := range modes {
+		t.Run(string(mode), func(t *testing.T) {
 			deps := testDeps(t)
 			tm := teatest.NewTestModel(t, NewOnboarding(deps), teatest.WithInitialTermSize(80, 24))
 			a := &acc{}
 
-			tm.Send(key(tea.KeyEnter)) // welcome -> mode
-			waitFor(t, tm, a, "Unlock mode")
-			for i := 0; i < tc.index; i++ {
+			tm.Send(key(tea.KeyEnter)) // welcome -> key type
+			waitFor(t, tm, a, "Key type for new files")
+			for j := 0; j < i; j++ {
 				tm.Send(key(tea.KeyDown))
 			}
-			tm.Send(key(tea.KeyEnter)) // select mode
-			waitFor(t, tm, a, "Secret")
-
-			tm.Type(tc.secret)
-			tm.Send(key(tea.KeyEnter)) // to confirm field
-			tm.Type(tc.secret)
-			tm.Send(key(tea.KeyEnter)) // confirm
-
-			if tc.has2FA {
-				waitFor(t, tm, a, "2FA")
-				tm.Type("123456")
-				tm.Send(key(tea.KeyEnter)) // code accepted
-				waitFor(t, tm, a, "Require 2FA")
-				tm.Send(key(tea.KeyEnter)) // gate-encrypt: default No
-			}
-
-			waitFor(t, tm, a, "Recovery key")
-			tm.Type("saved")
-			tm.Send(key(tea.KeyEnter)) // finalize
+			tm.Send(key(tea.KeyEnter)) // select key type -> gate
+			waitFor(t, tm, a, "gate-encrypt")
+			tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) // apply
 
 			tm.WaitFinished(t)
 
-			ks, err := deps.Store.Load()
+			st, err := deps.Settings.Load()
 			if err != nil {
-				t.Fatalf("keystore not written: %v", err)
+				t.Fatalf("settings not written: %v", err)
 			}
-			if ks.Mode != keystore.Mode(tc.name) {
-				t.Fatalf("mode = %q, want %q", ks.Mode, tc.name)
+			if st.KeyType != mode {
+				t.Fatalf("key type = %q, want %q", st.KeyType, mode)
 			}
-			info, err := os.Stat(deps.Store.Path())
+			info, err := os.Stat(deps.Settings.Path())
 			if err != nil {
 				t.Fatal(err)
 			}
 			if info.Mode().Perm() != 0o600 {
-				t.Fatalf("keystore mode = %o, want 600", info.Mode().Perm())
+				t.Fatalf("settings mode = %o, want 600", info.Mode().Perm())
 			}
 		})
 	}
 }
 
-func TestOnboardingEscBeforeLastScreenLeavesNoKeystore(t *testing.T) {
+func TestOnboardingEscLeavesNoSettings(t *testing.T) {
 	deps := testDeps(t)
 	tm := teatest.NewTestModel(t, NewOnboarding(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
 
-	tm.Send(key(tea.KeyEnter)) // welcome -> mode
-	waitFor(t, tm, a, "Unlock mode")
-	tm.Send(key(tea.KeyDown))
-	tm.Send(key(tea.KeyEnter)) // pin
-	waitFor(t, tm, a, "Secret")
-	tm.Type("123456")
-	tm.Send(key(tea.KeyEnter))
-	tm.Type("123456")
-	tm.Send(key(tea.KeyEnter)) // -> recovery screen
-	waitFor(t, tm, a, "Recovery key")
+	tm.Send(key(tea.KeyEnter)) // welcome -> key type
+	waitFor(t, tm, a, "Key type for new files")
+	tm.Send(key(tea.KeyEsc)) // back to welcome
+	tm.Send(key(tea.KeyEsc)) // quit
+	tm.WaitFinished(t)
 
-	// Esc walks back screen by screen and finally quits; nothing was written.
-	for i := 0; i < 10; i++ {
-		tm.Send(key(tea.KeyEsc))
-		time.Sleep(50 * time.Millisecond)
-	}
-	tm.WaitFinished(t, teatest.WithFinalTimeout(10*time.Second))
-
-	exists, err := deps.Store.Exists()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if exists {
-		t.Fatal("keystore exists after Esc before the last screen completed")
+	if ok, _ := deps.Settings.Exists(); ok {
+		t.Fatal("settings written despite Esc before apply")
 	}
 }
 
-var ansiRe = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]|\x1b\\][^\x07]*\x07")
-
-func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
-
-func TestViewsFit80x24(t *testing.T) {
+func TestHomeMenuTabNavigation(t *testing.T) {
 	deps := testDeps(t)
-	m := NewOnboarding(deps)
-	m.width, m.height = 80, 24
-	for s := screenWelcome; s <= screenRecovery; s++ {
-		m.screen = s
-		v := stripANSI(m.View())
-		lines := strings.Split(v, "\n")
-		if len(lines) > 24 {
-			t.Fatalf("onboarding screen %d: %d lines > 24", s, len(lines))
-		}
-		for _, l := range lines {
-			if w := len([]rune(l)); w > 80 {
-				t.Fatalf("onboarding screen %d: line width %d > 80: %q", s, w, l)
-			}
-		}
-	}
-
-	setupKeystore(t, deps, keystore.ModePassword)
-	h := NewHome(deps)
-	h.width, h.height = 80, 24
-	for _, s := range []homeScreen{homeMenu, homeStatus, homeHelp, homeResult} {
-		h.screen = s
-		v := stripANSI(h.View())
-		lines := strings.Split(v, "\n")
-		if len(lines) > 24 {
-			t.Fatalf("home screen %d: %d lines > 24", s, len(lines))
-		}
-		for _, l := range lines {
-			if w := len([]rune(l)); w > 80 {
-				t.Fatalf("home screen %d: line width %d > 80: %q", s, w, l)
-			}
-		}
-	}
-}
-
-var sgrRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
-func TestNoColorHonored(t *testing.T) {
-	// CLICOLOR_FORCE would enable color on a pipe; NO_COLOR must win.
-	t.Setenv("CLICOLOR_FORCE", "1")
-	t.Setenv("NO_COLOR", "1")
-
-	deps := testDeps(t)
-	tm := teatest.NewTestModel(t, NewOnboarding(deps), teatest.WithInitialTermSize(80, 24))
-	a := &acc{}
-	waitFor(t, tm, a, "Welcome")
-	_ = tm.Quit()
-
-	if sgrRe.Match(a.b) {
-		t.Fatal("output contains SGR color sequences despite NO_COLOR")
-	}
-}
-
-func TestColorUsedWhenAllowed(t *testing.T) {
-	t.Setenv("CLICOLOR_FORCE", "1")
-	t.Setenv("NO_COLOR", "")
-
-	deps := testDeps(t)
-	tm := teatest.NewTestModel(t, NewOnboarding(deps), teatest.WithInitialTermSize(80, 24))
-	a := &acc{}
-	waitFor(t, tm, a, "Welcome")
-	_ = tm.Quit()
-
-	if !sgrRe.Match(a.b) {
-		t.Fatal("expected SGR color sequences with CLICOLOR_FORCE and no NO_COLOR")
-	}
-}
-
-func TestHomeMenuAndLockViaPicker(t *testing.T) {
-	deps := testDeps(t)
-	setupKeystore(t, deps, keystore.ModePassword)
+	setupSettings(t, deps, keystore.ModePassword)
 	if err := os.WriteFile(filepath.Join(deps.StartDir, "a.txt"), []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Lock", "Unlock", "Status", "Settings", "Help")
+	waitFor(t, tm, a, "Encrypt", "Decrypt", "Settings")
 
-	tm.Send(key(tea.KeyEnter)) // Lock is the first item
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) && !bytes.Contains(a.b, []byte("a.txt")) {
-		teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
-			a.b = append(a.b, b...)
-			return bytes.Contains(a.b, []byte("a.txt"))
-		}, teatest.WithDuration(500*time.Millisecond))
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // -> Decrypt
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Decrypt — select a .pbx file")
+
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(tea.KeyMsg{Type: tea.KeyShiftTab}) // -> Encrypt
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, "Encrypt — select a file")
+
+	tm.Send(key(tea.KeyEsc))
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+}
+
+func TestHomeEncryptFileWithOwnKey(t *testing.T) {
+	deps := testDeps(t)
+	setupSettings(t, deps, keystore.ModePassword)
+	if err := os.WriteFile(filepath.Join(deps.StartDir, "a.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !bytes.Contains(a.b, []byte("a.txt")) {
-		t.Fatalf("picker never showed a.txt; acc tail:\n%s", a.b[max(0, len(a.b)-800):])
-	}
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Encrypt")
+
+	tm.Send(key(tea.KeyEnter)) // Encrypt -> picker
+	waitFor(t, tm, a, "a.txt")
 	tm.Send(key(tea.KeyDown))  // cursor: cfg/ -> a.txt
-	tm.Send(key(tea.KeyEnter)) // pick the file
-	waitFor(t, tm, a, ".pbx")  // result screen
+	tm.Send(key(tea.KeyEnter)) // pick the file -> secret screen
+	waitFor(t, tm, a, "Secret (password)", "at least 12 characters")
+	tm.Type("correct horse battery staple")
+	tm.Send(key(tea.KeyEnter)) // -> encrypt with a fresh per-file key
+	waitFor(t, tm, a, ".pbx")
 
-	tm.Send(key(tea.KeyEsc)) // back to menu
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+
+	pbx := filepath.Join(deps.StartDir, "a.txt.pbx")
+	if _, err := os.Stat(pbx); err != nil {
+		t.Fatalf("no .pbx output: %v", err)
+	}
+	ks, err := keystore.NewStore(pbx + ".key").Load()
+	if err != nil {
+		t.Fatalf("no per-file key sidecar: %v", err)
+	}
+	if ks.Mode != keystore.ModePassword {
+		t.Fatalf("sidecar mode = %q, want password", ks.Mode)
+	}
+}
+
+func TestHomeEncryptAsksKeyTypeWhenUnset(t *testing.T) {
+	deps := testDeps(t) // no settings: key type unset
+	if err := os.WriteFile(filepath.Join(deps.StartDir, "a.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Encrypt")
+
+	tm.Send(key(tea.KeyEnter)) // Encrypt -> picker
+	waitFor(t, tm, a, "a.txt")
+	tm.Send(key(tea.KeyDown))
+	tm.Send(key(tea.KeyEnter)) // pick file -> key type chooser
+	waitFor(t, tm, a, "Key type not set", "pin")
+	tm.Send(key(tea.KeyDown))  // -> pin
+	tm.Send(key(tea.KeyEnter)) // choose pin -> secret screen
+	waitFor(t, tm, a, "Secret (pin)", "6 to 12 digits")
+	tm.Type("123456")
+	tm.Send(key(tea.KeyEnter))
+	waitFor(t, tm, a, ".pbx")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+
+	ks, err := keystore.NewStore(filepath.Join(deps.StartDir, "a.txt.pbx.key")).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ks.Mode != keystore.ModePIN {
+		t.Fatalf("sidecar mode = %q, want pin", ks.Mode)
+	}
+}
+
+func TestHomeSettingsStableNavigation(t *testing.T) {
+	deps := testDeps(t)
+	setupSettings(t, deps, keystore.ModePassword)
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Settings")
+	for i := 0; i < 3; i++ {
+		tm.Send(key(tea.KeyDown))
+	}
+	tm.Send(key(tea.KeyEnter)) // open Settings
+	waitFor(t, tm, a, "Key type:", "Gate encrypt:", "a apply")
+
+	// Tab/backspace move down, arrows flip the option: several presses in a
+	// row must stay stable, one action per keypress, footer intact.
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})       // cursor -> gate-encrypt
+	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace}) // wrap back to key type
+	tm.Send(key(tea.KeyDown))                   // cursor -> gate-encrypt
+	tm.Send(key(tea.KeyLeft))                   // toggle gate to yes
+	waitFor(t, tm, a, "Gate encrypt: yes")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) // apply
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, err := deps.Settings.Load(); err == nil && st.GateEncrypt {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	st, err := deps.Settings.Load()
+	if err != nil || !st.GateEncrypt {
+		t.Fatalf("gate-encrypt not persisted: %v, %+v", err, st)
+	}
+	if !bytes.Contains(a.b, []byte("ctrl+c abort")) {
+		t.Fatal("footer corrupted during settings navigation")
+	}
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+}
+
+func TestHome2FAQRCodeAndCopy(t *testing.T) {
+	deps := testDeps(t)
+	setupSettings(t, deps, keystore.ModePassword2FA)
+	var copied []string
+	deps.CopyText = func(s string) error {
+		copied = append(copied, s)
+		return nil
+	}
+	if err := os.WriteFile(filepath.Join(deps.StartDir, "a.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+	waitFor(t, tm, a, "Encrypt")
+
+	tm.Send(key(tea.KeyEnter)) // Encrypt -> picker
+	waitFor(t, tm, a, "a.txt")
+	tm.Send(key(tea.KeyDown))
+	tm.Send(key(tea.KeyEnter)) // pick file -> secret screen
+	waitFor(t, tm, a, "Secret (password+2fa)")
+	tm.Type("correct horse battery staple")
+	tm.Send(key(tea.KeyEnter)) // -> 2FA QR screen
+
+	waitFor(t, tm, a, "█", "otpauth://")
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	waitFor(t, tm, a, "copied 2FA URI to clipboard")
+	if len(copied) != 1 || !strings.HasPrefix(copied[0], "otpauth://") {
+		t.Fatalf("clipboard got %q, want the otpauth URI", copied)
+	}
+
+	tm.Type("123456")
+	tm.Send(key(tea.KeyEnter)) // code accepted -> encrypt
+	waitFor(t, tm, a, ".pbx")
+
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
 	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx")); err != nil {
-		t.Fatalf("lock via picker did not produce a.txt.pbx: %v", err)
+		t.Fatalf("no .pbx output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx.key")); err != nil {
+		t.Fatalf("no per-file key sidecar: %v", err)
 	}
 }

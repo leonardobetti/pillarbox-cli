@@ -15,6 +15,10 @@ var ErrIntegrity = errors.New("integrity failure")
 // 7.4 step 3. cli maps it to exit code 2.
 var ErrExists = errors.New("output exists")
 
+// ErrUnsupported marks a folder path or .tar.pbx archive. Pillarbox encrypts
+// single files only; cli maps it to exit code 2.
+var ErrUnsupported = errors.New("folders are not supported")
+
 // streamErr marks an error raised inside the decrypt/extract callback as a
 // stream failure. Infrastructure errors from writeAtomic itself (temp file
 // creation, fsync, rename) stay plain I/O errors, so cli never reports an
@@ -38,18 +42,17 @@ type UnlockOptions struct {
 	Force bool   // overwrite existing paths
 }
 
-// Vault runs the lock and unlock pipelines, PRD sections 7.3 and 7.4: age
-// streaming, tar for folders, temp file + fsync + rename with mode 0600.
+// Vault runs the lock and unlock pipelines for single files, PRD sections
+// 7.3 and 7.4: age streaming, temp file + fsync + rename with mode 0600.
 // Vault owns the output files; no other package writes them.
 type Vault interface {
-	// Lock encrypts src, a file or a folder, under recipient (the keystore
-	// recipient string, parsed here so keystore never imports age). A folder
-	// becomes a tar stream with names inside the encrypted payload. A
-	// failure leaves no partial output. Returns the output path.
+	// Lock encrypts src, a single file, under recipient (the keystore
+	// recipient string, parsed here so keystore never imports age). Folders
+	// return ErrUnsupported. A failure leaves no partial output. Returns the
+	// output path.
 	Lock(src string, recipient string, opts LockOptions) (dst string, err error)
-	// Unlock decrypts src with identity and extracts it. Archive entries with
-	// .., absolute paths or symlinks resolving outside the target are
-	// rejected, existing paths are not overwritten without Force, and any
-	// tampering returns ErrIntegrity with no partial output left behind.
+	// Unlock decrypts src with identity. Existing paths are not overwritten
+	// without Force, and any tampering returns ErrIntegrity with no partial
+	// output left behind.
 	Unlock(src string, identity age.Identity, opts UnlockOptions) (dst string, err error)
 }

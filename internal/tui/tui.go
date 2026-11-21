@@ -11,14 +11,15 @@ import (
 // Deps wires the core services into the TUI, mirroring cli.Deps. Tests inject
 // the real implementations rooted in temp dirs, or fakes for TOTP.
 type Deps struct {
-	Store    keystore.Store
+	Settings keystore.SettingsStore
 	Wrapper  keystore.Wrapper
 	KDF      auth.KDF
 	TOTP     auth.TOTP
 	DevStore auth.DeviceSecretStore
 	Vault    vault.Vault
 	Version  string
-	StartDir string // picker start directory, default "."
+	StartDir string             // picker start directory, default "."
+	CopyText func(string) error // clipboard write, e.g. atotto/clipboard
 }
 
 // RunOnboarding runs the first-run onboarding flow, PRD 8.1, and returns the

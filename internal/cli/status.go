@@ -17,14 +17,14 @@ func newStatusCmd(d *Deps) *cobra.Command {
 
 // runStatus prints no secret, seed or key, FR-13.
 func (d *Deps) runStatus() error {
-	ks, err := d.loadKeystore()
+	st, err := d.loadSettings()
 	if err != nil {
 		return err
 	}
-	twoFA := "off"
-	if ks.WrappedTOTPSeed != nil {
-		twoFA = "on"
+	keyType := string(st.KeyType)
+	if keyType == "" {
+		keyType = "(not set)"
 	}
-	d.printf("mode: %s\n2fa: %s\nkeystore: %s\nversion: %s\n", ks.Mode, twoFA, d.Store.Path(), Version)
+	d.printf("key type: %s\ngate-encrypt: %t\nsettings: %s\nversion: %s\n", keyType, st.GateEncrypt, d.Settings.Path(), Version)
 	return nil
 }
