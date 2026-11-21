@@ -30,6 +30,7 @@ credentials*
 Thumbs.db
 
 # Local artifacts
+/bin/
 *.log
 coverage/
 .cache/
