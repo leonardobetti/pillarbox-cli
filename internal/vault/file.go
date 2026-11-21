@@ -9,46 +9,41 @@ import (
 	"strings"
 
 	"filippo.io/age"
-
-	"github.com/leonardobetti/pillarbox-cli/internal/archive"
 )
 
 // pbxExt is the default output extension for single files, PRD section 6.1.
 const pbxExt = ".pbx"
 
-// ageVault is the Vault implementation backed by filippo.io/age, with
-// internal/archive streaming folders through tar.
-type ageVault struct {
-	w archive.Writer
-	x archive.Extractor
-}
+// ageVault is the Vault implementation backed by filippo.io/age.
+type ageVault struct{}
 
 // New returns the Vault implementation.
 func New() Vault {
-	return ageVault{w: archive.NewWriter(), x: archive.NewExtractor()}
+	return ageVault{}
 }
 
-// Lock encrypts src, a single file or a folder, PRD 7.3. The plaintext
-// streams through age.Encrypt into a temp file in the output directory; only
-// a clean close is fsynced and renamed onto the final name, so a failure
-// leaves no partial output.
+// Lock encrypts src, a single file, PRD 7.3. The plaintext streams through
+// age.Encrypt into a temp file in the output directory; only a clean close is
+// fsynced and renamed onto the final name, so a failure leaves no partial
+// output. Folders return ErrUnsupported.
 func (v ageVault) Lock(src string, recipient string, opts LockOptions) (string, error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", err
 	}
 	if info.IsDir() {
-		return v.lockFolder(src, recipient, opts)
+		return "", ErrUnsupported
 	}
 	return v.lockFile(src, recipient, opts)
 }
 
-// Unlock decrypts src, a .pbx single file or a .tar.pbx folder archive, PRD
-// 7.4. Every failure from age (wrong identity, flipped, truncated or
-// appended bytes) is wrapped as ErrIntegrity and partial output is removed.
+// Unlock decrypts src, a .pbx single file, PRD 7.4. Every failure from age
+// (wrong identity, flipped, truncated or appended bytes) is wrapped as
+// ErrIntegrity and partial output is removed. Folder archives return
+// ErrUnsupported.
 func (v ageVault) Unlock(src string, identity age.Identity, opts UnlockOptions) (string, error) {
-	if strings.HasSuffix(src, tarPbxExt) {
-		return v.unlockFolder(src, identity, opts)
+	if strings.HasSuffix(src, ".tar.pbx") {
+		return "", ErrUnsupported
 	}
 	return v.unlockFile(src, identity, opts)
 }

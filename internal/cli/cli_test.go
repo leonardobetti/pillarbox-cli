@@ -185,6 +185,18 @@ func TestCommandsTable(t *testing.T) {
 			},
 		},
 		{
+			name: "lock a folder exits 2",
+			setup: func(t *testing.T, e *env) {
+				initPassword(t, e)
+				if err := os.Mkdir(filepath.Join(e.dir, "adir"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			args:     func(t *testing.T, e *env) []string { return []string{"lock", filepath.Join(e.dir, "adir"), "--no-tui"} },
+			wantExit: ExitUsage,
+			wantErr:  "folders are not supported",
+		},
+		{
 			name: "lock quiet prints nothing",
 			setup: func(t *testing.T, e *env) {
 				initPassword(t, e)

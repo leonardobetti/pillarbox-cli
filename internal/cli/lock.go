@@ -13,7 +13,7 @@ func newLockCmd(d *Deps) *cobra.Command {
 	c := &cobra.Command{
 		Use:     "lock <path>",
 		Aliases: []string{"encrypt"},
-		Short:   "Encrypt a file or folder",
+		Short:   "Encrypt a file",
 		Args:    exactArgs(1, "usage: pillarbox lock <path> [-o OUT] [--remove-original] [--force]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return d.runLock(args[0], out, removeOriginal, force)
@@ -31,7 +31,7 @@ func newUnlockCmd(d *Deps) *cobra.Command {
 	c := &cobra.Command{
 		Use:     "unlock <file.pbx>",
 		Aliases: []string{"decrypt"},
-		Short:   "Decrypt a .pbx file or .tar.pbx folder",
+		Short:   "Decrypt a .pbx file",
 		Args:    exactArgs(1, "usage: pillarbox unlock <file.pbx> [-o OUT] [--force]"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return d.runUnlock(args[0], out, force)

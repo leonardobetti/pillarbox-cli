@@ -244,9 +244,9 @@ func (m *Home) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Home) openPicker(action string) {
-	title := "Lock — select a file or folder"
+	title := "Encrypt — select a file"
 	if action == "unlock" {
-		title = "Unlock — select a .pbx file"
+		title = "Decrypt — select a .pbx file"
 	}
 	m.picker = NewPicker(title, action, m.deps.StartDir, m.th)
 	m.screen = homePicker

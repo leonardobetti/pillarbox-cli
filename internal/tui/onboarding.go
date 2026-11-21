@@ -325,7 +325,7 @@ func (m *Onboarding) View() string {
 	switch m.screen {
 	case screenWelcome:
 		b.WriteString(m.th.title.Render("Welcome to Pillarbox"))
-		b.WriteString("\n\nEncrypt and decrypt files and folders from the terminal.\n\n")
+		b.WriteString("\n\nEncrypt and decrypt files from the terminal.\n\n")
 		b.WriteString("Commands to know: lock <path>, unlock <file.pbx>\n\n")
 		b.WriteString(m.th.dim.Render("Press enter to continue"))
 	case screenMode:

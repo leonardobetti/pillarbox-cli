@@ -381,3 +381,33 @@ func TestUnlockFileOutputDirMissingIsNotIntegrity(t *testing.T) {
 		t.Fatalf("infrastructure error misclassified as integrity: %v", err)
 	}
 }
+
+// TestLockFolderUnsupported guards the single-file scope: locking a directory
+// must fail with ErrUnsupported and produce no output.
+func TestLockFolderUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := New()
+	id := newIdentity(t)
+	_, err := v.Lock(sub, id.Recipient().String(), LockOptions{})
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("Lock(dir): err = %v, want ErrUnsupported", err)
+	}
+	requireNoPartialOutput(t, dir, sub)
+}
+
+// TestUnlockTarPbxUnsupported guards the single-file scope on decrypt:
+// a folder archive must fail with ErrUnsupported, not an integrity error.
+func TestUnlockTarPbxUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "x.tar.pbx")
+	writeFile(t, src, []byte("not really an archive"))
+	v := New()
+	_, err := v.Unlock(src, newIdentity(t), UnlockOptions{})
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("Unlock(.tar.pbx): err = %v, want ErrUnsupported", err)
+	}
+}

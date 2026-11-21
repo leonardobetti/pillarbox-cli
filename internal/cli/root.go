@@ -267,6 +267,8 @@ func mapVaultErr(err error) error {
 		return &exitError{ExitIntegrity, "integrity failure: the file is corrupted, tampered with, or for another key"}
 	case errors.Is(err, vault.ErrExists):
 		return &exitError{ExitUsage, err.Error()}
+	case errors.Is(err, vault.ErrUnsupported):
+		return &exitError{ExitUsage, "folders are not supported; encrypt files one by one"}
 	default:
 		return &exitError{ExitOther, err.Error()}
 	}

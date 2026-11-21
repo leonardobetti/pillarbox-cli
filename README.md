@@ -1,6 +1,6 @@
 # Pillarbox
 
-Pillarbox encrypts and decrypts files and folders from the terminal. It needs no mouse, no account and no network. One static binary runs on macOS and Linux.
+Pillarbox encrypts and decrypts files from the terminal. It needs no mouse, no account and no network. One static binary runs on macOS and Linux.
 
 ## The problem
 
@@ -27,9 +27,8 @@ The install script verifies the archive against `checksums.txt` from the release
 Run this on a clean machine. It takes under a minute.
 
 1. Run `pillarbox`. Pillarbox guides you through five screens: what it does, the unlock mode, your secret, 2FA setup if you chose a 2FA mode, and your recovery key. Save the recovery key. Pillarbox shows it once.
-2. Lock a file: `pillarbox lock .env` creates `.env.pbx`.
-3. Lock a folder: `pillarbox lock ./project` creates `./project.tar.pbx`. File names and structure stay inside the encrypted stream.
-4. Unlock them back: `pillarbox unlock .env.pbx` and `pillarbox unlock ./project.tar.pbx`.
+2. Encrypt a file: `pillarbox lock .env` creates `.env.pbx`.
+3. Decrypt it back: `pillarbox unlock .env.pbx`.
 
 For scripts, skip the screens and pipe the secret:
 
@@ -70,7 +69,6 @@ The recovery key is an `age` secret key. With it, the stock `age` tool decrypts 
 
    ```sh
    age -d -i key.txt file.pbx > file
-   age -d -i key.txt project.tar.pbx | tar -x
    ```
 
 ## Commands
@@ -78,8 +76,8 @@ The recovery key is an `age` secret key. With it, the stock `age` tool decrypts 
 | Command | What it does |
 | --- | --- |
 | `pillarbox` | Onboarding when there is no keystore, home menu otherwise |
-| `pillarbox lock <path> [-o OUT] [--remove-original] [--force]` | Encrypt a file or folder |
-| `pillarbox unlock <file.pbx> [-o OUT] [--force]` | Decrypt a `.pbx` file or `.tar.pbx` folder |
+| `pillarbox lock <path> [-o OUT] [--remove-original] [--force]` | Encrypt a file |
+| `pillarbox unlock <file.pbx> [-o OUT] [--force]` | Decrypt a `.pbx` file |
 | `pillarbox status` | Show mode, 2FA state, keystore path and version |
 | `pillarbox export-key` | Print the recovery key after authentication |
 | `pillarbox config set gate-encrypt true\|false` | Require authentication before `lock` |

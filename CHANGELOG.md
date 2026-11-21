@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - The `pillarbox init` command. Setup now happens only through bare `pillarbox`, which starts onboarding when no keystore exists.
+- Folder encryption. `lock` accepts single files only and rejects folders with exit code 2; `.tar.pbx` archives are no longer produced or decrypted.
 
 ## [0.1.0] - 2026-11-21
 
