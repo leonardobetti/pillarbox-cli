@@ -44,6 +44,8 @@ const tagline = "Pillarbox encrypts and decrypts files from the terminal."
 
 const footerKeys = "Tab, ← or → to navigate  Enter to select  Q to quit  Backspace to change"
 
+const helpIntro = "Pillarbox encrypts and decrypts files in the terminal. Your secret is stretched with Argon2id before the file is sealed with age. Free and open source, built by Leonardo Betti and Nasser Khalil with help from LLMs."
+
 const helpText = "Tab / ← / → switch tabs • ↑/↓ move in the box • enter select • backspace toggle setting or parent dir • a apply (settings) • q quit • ctrl+c abort"
 
 type promptDoneMsg struct {
@@ -669,7 +671,7 @@ func (m *Home) contentBody(innerH int) string {
 	case homeStatus:
 		return "Status\n\n" + m.statusText
 	case homeHelp:
-		return "Help\n\n" + helpText
+		return "Help\n\n" + helpIntro + "\n\n" + helpText
 	case homeResult:
 		if m.resultIsErr {
 			return m.th.errS.Render(m.result)
