@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The secret screen and interactive prompts now state the secret rules for the chosen mode, with the security reason for each rule, before any input is required.
+
 ### Removed
 
 - The `pillarbox init` command. Setup now happens only through bare `pillarbox`, which starts onboarding when no keystore exists.

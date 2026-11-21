@@ -363,3 +363,19 @@ func TestOnboarding2FAQRCodeAndCopy(t *testing.T) {
 		t.Fatal("keystore written despite Esc before the last screen")
 	}
 }
+
+func TestOnboardingSecretScreenShowsRules(t *testing.T) {
+	deps := testDeps(t)
+	tm := teatest.NewTestModel(t, NewOnboarding(deps), teatest.WithInitialTermSize(80, 24))
+	a := &acc{}
+
+	tm.Send(key(tea.KeyEnter)) // welcome -> mode
+	waitFor(t, tm, a, "Unlock mode")
+	tm.Send(key(tea.KeyEnter)) // password mode -> secret screen
+
+	// The rules and their reasons are visible before any typing.
+	waitFor(t, tm, a, "at least 12 characters", "You need", "Secret:")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.WaitFinished(t)
+}

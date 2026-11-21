@@ -336,7 +336,11 @@ func (m *Onboarding) View() string {
 		b.WriteString(m.th.dim.Render("password: passphrase 12+ chars\npin: 6-12 digits, decrypts only on this device\npassword+2fa, pin+2fa: plus a TOTP code"))
 	case screenSecret:
 		b.WriteString(m.th.title.Render("Secret (" + string(m.mode) + ")"))
-		b.WriteString("\n\nSecret: " + m.secret.View() + "\n")
+		b.WriteString("\n\n")
+		for _, rule := range auth.SecretRules(m.mode) {
+			b.WriteString(m.th.dim.Render(rule) + "\n")
+		}
+		b.WriteString("\nSecret: " + m.secret.View() + "\n")
 		b.WriteString("Confirm: " + m.confirm.View() + "\n")
 	case screen2FA:
 		b.WriteString(m.th.title.Render("Set up 2FA"))

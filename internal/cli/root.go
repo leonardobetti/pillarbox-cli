@@ -239,6 +239,14 @@ func (d *Deps) loadKeystore() (*keystore.Keystore, error) {
 // authenticate runs the unlock flow and maps failures to exit codes: no input
 // is 2, a wrong secret or code is 3.
 func (d *Deps) authenticate(ks *keystore.Keystore) (identity []byte, newStep int64, err error) {
+	// When prompting on a terminal, state the secret rules before the prompt
+	// so the user is not surprised by a rejection. Scripts using
+	// --secret-stdin get no extra output.
+	if !d.opts.secretStdin && d.Prompter != nil && isTerminal(d.Stdin) {
+		for _, rule := range auth.SecretRules(ks.Mode) {
+			_, _ = fmt.Fprintln(d.Stderr, rule)
+		}
+	}
 	secret, err := d.readSecret(false)
 	if err != nil {
 		return nil, 0, err

@@ -38,7 +38,7 @@ printf '%s\n' "$MY_SECRET" | pillarbox --no-tui --secret-stdin lock .env
 
 ## Unlock modes
 
-The onboarding menu picks one of four unlock modes:
+The onboarding menu picks one of four unlock modes. The secret screen states the rules for the chosen mode, and why they exist, before you type anything:
 
 | Mode | Secret | Device secret in the key | TOTP check |
 | --- | --- | --- | --- |
