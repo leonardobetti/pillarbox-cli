@@ -264,9 +264,9 @@ func TestHomeMenuAndLockViaPicker(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 24))
 	a := &acc{}
-	waitFor(t, tm, a, "Lock", "Unlock", "Status", "Settings", "Help")
+	waitFor(t, tm, a, "Encrypt", "Decrypt", "Status", "Settings", "Help")
 
-	tm.Send(key(tea.KeyEnter)) // Lock is the first item
+	tm.Send(key(tea.KeyEnter)) // Encrypt is the first item
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) && !bytes.Contains(a.b, []byte("a.txt")) {
 		teatest.WaitFor(t, tm.Output(), func(b []byte) bool {

@@ -42,7 +42,7 @@ type promptDoneMsg struct {
 
 type promptCancelledMsg struct{}
 
-// Home is the home menu of PRD 8.2: Lock, Unlock, Status, Settings, Help.
+// Home is the home menu of PRD 8.2: Encrypt, Decrypt, Status, Settings, Help.
 type Home struct {
 	deps   *Deps
 	th     theme
@@ -71,8 +71,8 @@ const helpText = "↑/↓ or k/j move • ←/→ or h/l parent/enter folder •
 func NewHome(d *Deps) *Home {
 	th := newTheme(os.Stdout)
 	items := []list.Item{
-		menuItem("Lock"),
-		menuItem("Unlock"),
+		menuItem("Encrypt"),
+		menuItem("Decrypt"),
 		menuItem("Status"),
 		menuItem("Settings"),
 		menuItem("Help"),
@@ -190,7 +190,7 @@ func (m *Home) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch it {
-	case "Lock":
+	case "Encrypt":
 		if m.ks == nil {
 			m.setResult("", errors.New(m.ksErr))
 			return m, nil
@@ -200,7 +200,7 @@ func (m *Home) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.openPicker("lock")
 		}
-	case "Unlock":
+	case "Decrypt":
 		if m.ks == nil {
 			m.setResult("", errors.New(m.ksErr))
 			return m, nil
