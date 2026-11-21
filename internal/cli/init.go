@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+
 	"filippo.io/age"
 	"github.com/spf13/cobra"
 
@@ -63,7 +65,14 @@ func (d *Deps) runInit(modeStr string, force bool) error {
 
 	var seed []byte
 	if m.Has2FA() {
-		seed, uri, err := d.TOTP.GenerateSeed()
+		var uri string
+		// PILLARBOX_E2E_TOTP_SEED is a test hook used only by scripts/e2e.sh;
+		// it is unset in production and still requires a valid code.
+		if s := os.Getenv("PILLARBOX_E2E_TOTP_SEED"); s != "" {
+			seed, uri, err = auth.GenerateSeedFromBase32(s)
+		} else {
+			seed, uri, err = d.TOTP.GenerateSeed()
+		}
 		if err != nil {
 			return &exitError{ExitOther, "cannot generate TOTP seed"}
 		}

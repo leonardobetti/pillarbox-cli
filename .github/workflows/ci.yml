@@ -33,3 +33,23 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+
+  e2e:
+    name: scripts/e2e.sh
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Run e2e
+        run: bash scripts/e2e.sh

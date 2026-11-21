@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base32"
+	"errors"
 	"time"
 
 	"github.com/pquerna/otp"
@@ -28,6 +29,31 @@ func (totpImpl) GenerateSeed() (seed []byte, otpauthURI string, err error) {
 	seed = make([]byte, 20)
 	if _, err := rand.Read(seed); err != nil {
 		return nil, "", err
+	}
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "Pillarbox",
+		AccountName: "pillarbox",
+		Secret:      seed,
+		Period:      totpPeriod,
+		Digits:      otp.DigitsSix,
+		Algorithm:   otp.AlgorithmSHA1,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return seed, key.URL(), nil
+}
+
+// GenerateSeedFromBase32 builds a seed and its otpauth URI from a base32
+// string. It exists for scripts/e2e.sh, which must know the seed to compute a
+// valid code; production uses GenerateSeed.
+func GenerateSeedFromBase32(s string) (seed []byte, otpauthURI string, err error) {
+	seed, err = base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(s)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(seed) != 20 {
+		return nil, "", errors.New("seed must decode to 20 bytes")
 	}
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "Pillarbox",
