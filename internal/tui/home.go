@@ -536,8 +536,8 @@ func (m *Home) resizeView() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.th.dim.Render("Terminal too small for this UI."))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Need at least %d×%d cells (~800×800px). Now %d×%d.",
-		minTermWidth, minTermHeight, m.width, m.height))
+	fmt.Fprintf(&b, "Need at least %d×%d cells (~800×800px). Now %d×%d.",
+		minTermWidth, minTermHeight, m.width, m.height)
 	b.WriteString("\n\n")
 	b.WriteString(m.th.dim.Render("Resize the window, or press q to quit."))
 	w, h := m.width, m.height
