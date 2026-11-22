@@ -8,6 +8,14 @@ Cryptomator encrypts files with a passphrase, but it needs a GUI. Tools such as 
 
 ## Install
 
+Homebrew (macOS and Linux):
+
+```sh
+brew install leonardobetti/tap/pillarbox
+```
+
+Install script:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/leonardobetti/pillarbox-cli/main/scripts/install.sh | sh
 ```

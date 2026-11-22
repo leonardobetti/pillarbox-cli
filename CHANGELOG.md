@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Homebrew tap distribution (`brew install leonardobetti/tap/pillarbox`) published via GoReleaser.
+
+### Changed
+
+- Keyboard shortcut keys in footers now render in the theme's bright foreground colour (white on Default, high-contrast foreground on built-in dark and light themes) while labels stay dim.
+
 ## [0.4.0] - 2026-11-21
 
 ### Added

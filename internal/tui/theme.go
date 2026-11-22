@@ -28,7 +28,7 @@ type theme struct {
 	name      string
 	title     lipgloss.Style
 	dim       lipgloss.Style
-	key       lipgloss.Style // dim colour, bold — shortcut glyphs in footers
+	key       lipgloss.Style // foreground colour, bold — shortcut glyphs in footers
 	selected  lipgloss.Style // bold focus row in lists
 	errS      lipgloss.Style
 	ok        lipgloss.Style
@@ -42,13 +42,14 @@ func newTheme(w io.Writer, name string) theme {
 	r := newRenderer(w)
 	id := NormalizeTheme(name)
 	p := paletteFor(id)
+	titleColor := lipgloss.Color(p.title)
 	dimColor := lipgloss.Color(p.dim)
 	accent := lipgloss.Color(p.accent)
 	return theme{
 		name:      id,
-		title:     r.NewStyle().Bold(true).Foreground(lipgloss.Color(p.title)),
+		title:     r.NewStyle().Bold(true).Foreground(titleColor),
 		dim:       r.NewStyle().Foreground(dimColor),
-		key:       r.NewStyle().Bold(true).Foreground(dimColor),
+		key:       r.NewStyle().Bold(true).Foreground(titleColor),
 		selected:  r.NewStyle().Bold(true).Foreground(lipgloss.Color(p.selected)),
 		errS:      r.NewStyle().Foreground(lipgloss.Color(p.err)),
 		ok:        r.NewStyle().Foreground(lipgloss.Color(p.ok)),
@@ -62,8 +63,8 @@ func newTheme(w io.Writer, name string) theme {
 	}
 }
 
-// renderKeys styles {Key} markers as bold shortcuts in dim help text.
-// Example: "{Q} to quit" → bold Q, dim " to quit".
+// renderKeys styles {Key} markers as bold foreground shortcuts in dim help text.
+// Example: "{Q} to quit" → bold bright Q, dim " to quit".
 func renderKeys(th theme, s string) string {
 	var b strings.Builder
 	for {

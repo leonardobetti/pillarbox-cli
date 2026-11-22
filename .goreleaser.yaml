@@ -31,5 +31,23 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+homebrew_casks:
+  - name: pillarbox
+    homepage: "https://github.com/leonardobetti/pillarbox-cli"
+    description: "Encrypt and decrypt files in the terminal"
+    license: "MIT"
+    directory: Casks
+    repository:
+      owner: leonardobetti
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/pillarbox"]
+          end
+
 changelog:
   disable: true

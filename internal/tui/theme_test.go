@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestFitDoesNotSplitANSISequences(t *testing.T) {
@@ -32,10 +33,53 @@ func TestRenderKeysBoldsShortcuts(t *testing.T) {
 	if !strings.Contains(out, "Q") || !strings.Contains(out, "to quit") {
 		t.Fatalf("renderKeys = %q", out)
 	}
+	if got := ansi.Strip(out); got != "Q to quit" {
+		t.Fatalf("stripped renderKeys = %q, want %q", got, "Q to quit")
+	}
 	// Bold SGR should wrap the key when colours are on; plain "Q to quit"
 	// as one run of text must not appear (bold splits Q from the rest).
 	if strings.Contains(out, "Q to quit") && !strings.Contains(out, "\x1b") {
 		// NO_COLOR / non-TTY may leave plain text; that is fine.
 		return
+	}
+}
+
+func TestKeyStyleUsesForegroundColorNotDim(t *testing.T) {
+	cases := []struct {
+		name      string
+		wantKeyFG lipgloss.Color
+		wantDimFG lipgloss.Color
+	}{
+		{name: ThemeDefault, wantKeyFG: lipgloss.Color("15"), wantDimFG: lipgloss.Color("8")},
+		{name: "Dracula", wantKeyFG: lipgloss.Color(kittyThemes["Dracula"].Title), wantDimFG: lipgloss.Color(kittyThemes["Dracula"].Dim)},
+		{name: "Catppuccin-Mocha", wantKeyFG: lipgloss.Color(kittyThemes["Catppuccin-Mocha"].Title), wantDimFG: lipgloss.Color(kittyThemes["Catppuccin-Mocha"].Dim)},
+		// Light themes must use their dark foreground rather than hardcoded white.
+		{name: "Alabaster", wantKeyFG: lipgloss.Color("#000000"), wantDimFG: lipgloss.Color("#777777")},
+		{name: "1984_light", wantKeyFG: lipgloss.Color("#19152c"), wantDimFG: lipgloss.Color("#000000")},
+		{name: "ayu_light", wantKeyFG: lipgloss.Color("#5b6673"), wantDimFG: lipgloss.Color("#323232")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme(nil, tc.name)
+			if !th.key.GetBold() {
+				t.Fatalf("theme %q: key style should be bold", tc.name)
+			}
+			if th.dim.GetBold() {
+				t.Fatalf("theme %q: dim style should not be bold", tc.name)
+			}
+			if got := th.key.GetForeground(); got != tc.wantKeyFG {
+				t.Fatalf("theme %q: key foreground = %v, want %v", tc.name, got, tc.wantKeyFG)
+			}
+			if got := th.dim.GetForeground(); got != tc.wantDimFG {
+				t.Fatalf("theme %q: dim foreground = %v, want %v", tc.name, got, tc.wantDimFG)
+			}
+			if th.key.GetForeground() == th.dim.GetForeground() {
+				t.Fatalf("theme %q: key foreground matches dim (%v)", tc.name, th.key.GetForeground())
+			}
+			out := renderKeys(th, "{A} apply • {Esc} cancel")
+			if got := ansi.Strip(out); got != "A apply • Esc cancel" {
+				t.Fatalf("theme %q: stripped footer = %q", tc.name, got)
+			}
+		})
 	}
 }
