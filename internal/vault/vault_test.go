@@ -85,8 +85,9 @@ func TestLockUnlockRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
-	if dst != src+pbxExt {
-		t.Fatalf("default output = %q, want %q", dst, src+pbxExt)
+	wantDst := filepath.Join(dir, "secret"+pbxExt)
+	if dst != wantDst {
+		t.Fatalf("default output = %q, want %q", dst, wantDst)
 	}
 
 	out := filepath.Join(dir, "restored.txt")
@@ -222,21 +223,78 @@ func TestLockUnlockEmptyFile(t *testing.T) {
 	}
 }
 
-func TestLockRefusesExistingOutputWithoutForce(t *testing.T) {
+func TestLockAutoSuffixOnCollisionAndForceOverwrite(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "a.txt")
-	writeFile(t, src, []byte("data"))
+	jpg := filepath.Join(dir, "alice.jpg")
+	png := filepath.Join(dir, "alice.png")
+	writeFile(t, jpg, []byte("jpg-data"))
+	writeFile(t, png, []byte("png-data"))
 
 	v := New()
 	id := newIdentity(t)
-	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{}); err != nil {
+	first, err := v.Lock(jpg, testKeystore(t, id), LockOptions{})
+	if err != nil {
 		t.Fatalf("first Lock: %v", err)
 	}
-	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{}); err == nil {
-		t.Fatal("second Lock without Force succeeded, want error")
+	if first != filepath.Join(dir, "alice.pbx") {
+		t.Fatalf("first Lock = %q, want alice.pbx", first)
 	}
-	if _, err := v.Lock(src, testKeystore(t, id), LockOptions{Force: true}); err != nil {
+	second, err := v.Lock(png, testKeystore(t, id), LockOptions{})
+	if err != nil {
+		t.Fatalf("second Lock: %v", err)
+	}
+	if second != filepath.Join(dir, "alice-2.pbx") {
+		t.Fatalf("second Lock = %q, want alice-2.pbx", second)
+	}
+	// Force overwrites the default alice.pbx instead of suffixing.
+	forced, err := v.Lock(jpg, testKeystore(t, id), LockOptions{Force: true})
+	if err != nil {
 		t.Fatalf("Lock with Force: %v", err)
+	}
+	if forced != filepath.Join(dir, "alice.pbx") {
+		t.Fatalf("forced Lock = %q, want alice.pbx", forced)
+	}
+	// Explicit -o still refuses overwrite without Force.
+	if _, err := v.Lock(jpg, testKeystore(t, id), LockOptions{Out: first}); !errors.Is(err, ErrExists) {
+		t.Fatalf("explicit -o over existing without Force: err = %v, want ErrExists", err)
+	}
+	if _, err := v.Lock(jpg, testKeystore(t, id), LockOptions{Out: first, Force: true}); err != nil {
+		t.Fatalf("explicit -o with Force: %v", err)
+	}
+}
+
+func TestStemAndDefaultLockPath(t *testing.T) {
+	cases := map[string]string{
+		"alice.jpg":     "alice",
+		"backup.tar.gz": "backup",
+		".env":          ".env",
+		".env.local":    ".env",
+		"Makefile":      "Makefile",
+		"a":             "a",
+	}
+	for in, want := range cases {
+		if got := Stem(in); got != want {
+			t.Errorf("Stem(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestDefaultUnlockPathRestoresOriginalAndRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	pbx := filepath.Join(dir, "alice-2.pbx")
+	got, err := DefaultUnlockPath(pbx, "alice.png")
+	if err != nil || got != filepath.Join(dir, "alice.png") {
+		t.Fatalf("DefaultUnlockPath with origName = (%q, %v)", got, err)
+	}
+	// Legacy fallback strips .pbx when origName is empty.
+	legacy, err := DefaultUnlockPath(filepath.Join(dir, "old.txt.pbx"), "")
+	if err != nil || legacy != filepath.Join(dir, "old.txt") {
+		t.Fatalf("DefaultUnlockPath legacy = (%q, %v)", legacy, err)
+	}
+	for _, bad := range []string{"../evil.jpg", "/etc/passwd", "sub/file.jpg", "..", ".", "a\x00b"} {
+		if _, err := DefaultUnlockPath(pbx, bad); !errors.Is(err, ErrIntegrity) {
+			t.Errorf("DefaultUnlockPath(%q) = %v, want ErrIntegrity", bad, err)
+		}
 	}
 }
 
@@ -315,7 +373,7 @@ func TestUnlockDefaultNameStripsPbx(t *testing.T) {
 	if err := os.Remove(src); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	got, err := v.Unlock(dst, id, UnlockOptions{})
+	got, err := v.Unlock(dst, id, UnlockOptions{OriginalName: "note.txt"})
 	if err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}

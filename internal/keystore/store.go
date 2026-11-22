@@ -95,6 +95,9 @@ func (ks *Keystore) validate() error {
 	if ks.Mode.Has2FA() && ks.WrappedTOTPSeed == nil {
 		return fmt.Errorf("%w: 2FA mode without wrapped TOTP seed", ErrInvalid)
 	}
+	if ks.WrappedName != nil && (len(ks.WrappedName.Nonce) != 24 || len(ks.WrappedName.Ciphertext) == 0) {
+		return fmt.Errorf("%w: malformed wrapped name", ErrInvalid)
+	}
 	return nil
 }
 

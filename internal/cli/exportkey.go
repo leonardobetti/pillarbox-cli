@@ -27,10 +27,10 @@ func (d *Deps) runExportKey(src string) error {
 	if err != nil {
 		return err
 	}
-	identityBytes, _, err := d.authenticate(ks)
+	res, err := d.authenticate(ks)
 	if err != nil {
 		return err
 	}
-	d.println(string(identityBytes))
+	d.println(string(res.Identity))
 	return nil
 }

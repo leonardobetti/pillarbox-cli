@@ -55,19 +55,28 @@ type TOTP interface {
 	Verify(seed []byte, code string, lastStep int64) (ok bool, newStep int64, err error)
 }
 
+// Result holds the decrypted metadata returned by Authenticator.Authenticate.
+type Result struct {
+	Identity     []byte
+	OriginalName string // restored basename when WrappedName was stored; empty for legacy .pbx
+	NewTOTPStep  int64
+}
+
 // Authenticator is the single call cli and tui make to unlock, PRD 7.4 steps
 // 1-2. It derives the KEK, unwraps the identity and, for 2FA modes, verifies
-// the code. On success it returns the raw age identity bytes and the TOTP
-// step to persist; the caller stores the step through keystore.Store, the
-// only writer of the keystore. A failed unwrap or a wrong code returns
-// ErrAuth and says nothing about which factor failed.
+// the code. On success it returns the raw age identity bytes, the restored
+// original filename (when stored), and the TOTP step to persist; the caller
+// stores the step through keystore.Store, the only writer of the keystore. A
+// failed unwrap or a wrong code returns ErrAuth and says nothing about which
+// factor failed.
 type Authenticator interface {
-	Authenticate(ks *keystore.Keystore, secret []byte, totpCode string) (identity []byte, newTOTPStep int64, err error)
+	Authenticate(ks *keystore.Keystore, secret []byte, totpCode string) (Result, error)
 }
 
 // Initializer builds a new keystore, PRD 7.1: it derives the KEK from the
-// secret and wraps the identity (and the TOTP seed for 2FA modes) under it.
-// identity is the raw age secret key bytes; it is never stored in the clear.
+// secret and wraps the identity (plus the TOTP seed for 2FA modes, and the
+// original basename when provided) under it. identity is the raw age secret
+// key bytes; it is never stored in the clear.
 type Initializer interface {
-	Initialize(mode keystore.Mode, recipient string, identity, secret, deviceSecret, totpSeed []byte, params keystore.Argon2Params) (*keystore.Keystore, error)
+	Initialize(mode keystore.Mode, recipient string, identity, secret, deviceSecret, totpSeed []byte, params keystore.Argon2Params, origName string) (*keystore.Keystore, error)
 }

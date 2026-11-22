@@ -116,17 +116,80 @@ func (v ageVault) SaveKey(src string, ks *keystore.Keystore) error {
 	})
 }
 
+// Stem strips everything from the first non-leading dot in a filename so that
+// extensions (including compound ones like .tar.gz) are hidden on disk while
+// dotfiles such as .env keep their leading dot intact.
+func Stem(base string) string {
+	if len(base) <= 1 {
+		return base
+	}
+	if idx := strings.IndexByte(base[1:], '.'); idx >= 0 {
+		return base[:idx+1]
+	}
+	return base
+}
+
+// DefaultLockPath computes the default .pbx path for src by stripping its
+// extension(s) to hide the original file format (e.g. alice.jpg -> alice.pbx,
+// backup.tar.gz -> backup.pbx, .env -> .env.pbx). When force is false and the
+// default path already exists, it auto-suffixes (-2, -3, ...) to avoid
+// colliding with another file sharing the same stem.
+func DefaultLockPath(src string, force bool) (string, error) {
+	dir := filepath.Dir(src)
+	stem := Stem(filepath.Base(src))
+	base := filepath.Join(dir, stem+pbxExt)
+	if force {
+		return base, nil
+	}
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return base, nil
+	} else if err != nil {
+		return "", err
+	}
+	for n := 2; n < 100000; n++ {
+		cand := filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, n, pbxExt))
+		if _, err := os.Stat(cand); os.IsNotExist(err) {
+			return cand, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("%w: could not find free output name for %s", ErrExists, base)
+}
+
+// DefaultUnlockPath returns the default output path for decrypting src. When
+// origName is non-empty (restored from a wrapped filename in the keystore),
+// it is validated as a safe single basename and placed beside src. Otherwise
+// (legacy .pbx without a wrapped filename), the trailing .pbx suffix is
+// stripped.
+func DefaultUnlockPath(src, origName string) (string, error) {
+	if origName != "" {
+		if origName == "." || origName == ".." || strings.ContainsAny(origName, "/\\\x00") || filepath.Base(origName) != origName {
+			return "", fmt.Errorf("%w: invalid stored filename", ErrIntegrity)
+		}
+		return filepath.Join(filepath.Dir(src), origName), nil
+	}
+	if !strings.HasSuffix(src, pbxExt) {
+		return "", fmt.Errorf("not a %s file: %s", pbxExt, src)
+	}
+	return strings.TrimSuffix(src, pbxExt), nil
+}
+
 func (v ageVault) lockFile(src string, ks *keystore.Keystore, opts LockOptions) (string, error) {
 	r, err := parseRecipient(ks.Recipient)
 	if err != nil {
 		return "", err
 	}
 	dst := opts.Out
-	if dst == "" {
-		dst = src + pbxExt
-	}
-	if err := checkOutputFree(dst, opts.Force); err != nil {
-		return "", err
+	if dst != "" {
+		if err := checkOutputFree(dst, opts.Force); err != nil {
+			return "", err
+		}
+	} else {
+		dst, err = DefaultLockPath(src, opts.Force)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	in, err := os.Open(src)
@@ -177,10 +240,10 @@ func (v ageVault) unlockFile(src string, identity age.Identity, opts UnlockOptio
 
 	dst := opts.Out
 	if dst == "" {
-		if !strings.HasSuffix(src, pbxExt) {
-			return "", fmt.Errorf("not a %s file: %s", pbxExt, src)
+		dst, err = DefaultUnlockPath(src, opts.OriginalName)
+		if err != nil {
+			return "", err
 		}
-		dst = strings.TrimSuffix(src, pbxExt)
 	}
 	if err := checkOutputFree(dst, opts.Force); err != nil {
 		return "", err

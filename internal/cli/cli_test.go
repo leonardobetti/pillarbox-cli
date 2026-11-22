@@ -518,3 +518,55 @@ func TestNoSecretAsArgument(t *testing.T) {
 		t.Fatalf("secret-taking flags found: %v", bad)
 	}
 }
+
+func TestHiddenExtensionAndCollisionAutoSuffixRoundTrip(t *testing.T) {
+	e := newEnv(t)
+	initPassword(t, e)
+	jpg := makeFile(t, e, "alice.jpg", "jpeg-bytes")
+	png := makeFile(t, e, "alice.png", "png-bytes")
+	tarGz := makeFile(t, e, "backup.tar.gz", "targz-bytes")
+	dotEnv := makeFile(t, e, ".env", "SECRET=1")
+
+	for _, f := range []string{jpg, png, tarGz, dotEnv} {
+		code, _, errOut := e.run(t, testSecret+"\n", "lock", f, "--no-tui", "--secret-stdin", "--remove-original")
+		if code != ExitOK {
+			t.Fatalf("lock %s: exit %d, stderr %q", f, code, errOut)
+		}
+	}
+
+	pbx1 := filepath.Join(e.dir, "alice.pbx")
+	pbx2 := filepath.Join(e.dir, "alice-2.pbx")
+	pbxTar := filepath.Join(e.dir, "backup.pbx")
+	pbxEnv := filepath.Join(e.dir, ".env.pbx")
+	for _, p := range []string{pbx1, pbx2, pbxTar, pbxEnv} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("expected encrypted file %s: %v", p, err)
+		}
+	}
+	// None of the encrypted files should contain the hidden extension in plaintext.
+	if b, err := os.ReadFile(pbx1); err != nil || bytes.Contains(b, []byte(".jpg")) || bytes.Contains(b, []byte("alice.jpg")) {
+		t.Fatalf("alice.pbx leaked original extension (err=%v)", err)
+	}
+	if b, err := os.ReadFile(pbxTar); err != nil || bytes.Contains(b, []byte(".tar")) || bytes.Contains(b, []byte(".gz")) {
+		t.Fatalf("backup.pbx leaked compound extension (err=%v)", err)
+	}
+
+	// Unlock without -o restores every original filename, including auto-suffixed alice-2.pbx -> alice.png.
+	for _, tc := range []struct {
+		pbx, wantPath, wantBody string
+	}{
+		{pbx1, jpg, "jpeg-bytes"},
+		{pbx2, png, "png-bytes"},
+		{pbxTar, tarGz, "targz-bytes"},
+		{pbxEnv, dotEnv, "SECRET=1"},
+	} {
+		code, _, errOut := e.run(t, testSecret+"\n", "unlock", tc.pbx, "--no-tui", "--secret-stdin")
+		if code != ExitOK {
+			t.Fatalf("unlock %s: exit %d, stderr %q", tc.pbx, code, errOut)
+		}
+		got, err := os.ReadFile(tc.wantPath)
+		if err != nil || string(got) != tc.wantBody {
+			t.Fatalf("restored %s = (%q, %v), want %q", tc.wantPath, got, err, tc.wantBody)
+		}
+	}
+}

@@ -8,9 +8,13 @@ and `internal/vault`.
 
 - Settings (`settings.json`) hold the default key type for new encrypts and the
   auth-encrypt toggle. Changing Settings does not rewrite existing `.pbx` files.
-- Every `lock` creates a fresh age identity, wraps it under a KEK derived from
-  the secret (and the device secret for PIN modes), and embeds the keystore in
-  a `PBX1` header on the `.pbx`.
+- Every `lock` creates a fresh age identity, wraps it and the original basename
+  under a KEK derived from the secret (and the device secret for PIN modes),
+  and embeds the keystore in a `PBX1` header on `<stem>.pbx` (stripping
+  extensions from the first non-leading dot, keeping dotfiles like `.env.pbx`,
+  and auto-suffixing collisions `-2`, `-3`, ... unless `--force`). On unlock,
+  the encrypted basename is unwrapped after authentication and restored next to
+  the `.pbx` (falling back to trimming `.pbx` for legacy files).
 - PIN modes use one machine-local `device.key`.
 - 2FA modes use one install-wide `totp.seed`. The QR is shown once. Every 2FA
   file wraps that same seed under its own KEK. Decrypt still asks for a TOTP

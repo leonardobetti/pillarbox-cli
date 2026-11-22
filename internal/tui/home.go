@@ -118,6 +118,7 @@ type Home struct {
 	pendingSecret string
 
 	pendingIdentity *age.X25519Identity // decrypt after overwrite confirm
+	pendingOrigName string
 	decryptDst      string
 
 	postPhase    postEncryptPhase
@@ -400,6 +401,7 @@ func (m *Home) returnToTab() {
 	m.pendingPath = ""
 	m.pendingKS = nil
 	m.pendingIdentity = nil
+	m.pendingOrigName = ""
 	m.decryptDst = ""
 	m.defaultSavedNotice = false
 	m.postLocked, m.postOriginal, m.postRecovery = "", "", ""
@@ -664,22 +666,28 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 		return
 	}
 	// decrypt
-	id, step, err := auth.NewAuthenticator(m.deps.KDF, m.deps.Wrapper, m.deps.DevStore, m.deps.TOTP).
+	res, err := auth.NewAuthenticator(m.deps.KDF, m.deps.Wrapper, m.deps.DevStore, m.deps.TOTP).
 		Authenticate(m.pendingKS, []byte(msg.secret), msg.code)
 	if err != nil {
 		m.setResult("", errors.New("authentication failed; check the secret and the 2FA code"))
 		return
 	}
 	if m.pendingKS.Mode.Has2FA() {
+		step := res.NewTOTPStep
 		m.pendingKS.LastTOTPStep = &step
 		_ = m.deps.Vault.SaveKey(m.pendingPath, m.pendingKS)
 	}
-	identity, err := age.ParseX25519Identity(string(id))
+	identity, err := age.ParseX25519Identity(string(res.Identity))
 	if err != nil {
 		m.setResult("", err)
 		return
 	}
-	dst := strings.TrimSuffix(m.pendingPath, ".pbx")
+	dst, err := vault.DefaultUnlockPath(m.pendingPath, res.OriginalName)
+	if err != nil {
+		m.setResult("", err)
+		return
+	}
+	m.pendingOrigName = res.OriginalName
 	if _, err := os.Stat(dst); err == nil {
 		m.pendingIdentity = identity
 		m.decryptDst = dst
@@ -690,8 +698,13 @@ func (m *Home) runPromptDone(msg promptDoneMsg) {
 }
 
 func (m *Home) finishDecrypt(identity *age.X25519Identity, force bool) {
-	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{Force: force})
+	origName := m.pendingOrigName
+	dst, err := m.deps.Vault.Unlock(m.pendingPath, identity, vault.UnlockOptions{
+		OriginalName: origName,
+		Force:        force,
+	})
 	m.pendingIdentity = nil
+	m.pendingOrigName = ""
 	m.decryptDst = ""
 	if err != nil {
 		m.setResult("", err)
@@ -774,7 +787,7 @@ func (m *Home) doEncrypt(secret string, seed []byte) {
 	}
 	ks, err := auth.NewInitializer(m.deps.KDF, m.deps.Wrapper).Initialize(
 		mode, identity.Recipient().String(), []byte(identity.String()),
-		[]byte(secret), devSecret, seed, keystore.DefaultArgon2Params)
+		[]byte(secret), devSecret, seed, keystore.DefaultArgon2Params, filepath.Base(original))
 	if err != nil {
 		m.setResult("", err)
 		return

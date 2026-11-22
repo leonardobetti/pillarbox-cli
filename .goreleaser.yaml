@@ -37,6 +37,7 @@ homebrew_casks:
     description: "Encrypt and decrypt files in the terminal"
     license: "MIT"
     directory: Casks
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_TOKEN }}auto{{ else }}true{{ end }}'
     repository:
       owner: leonardobetti
       name: homebrew-tap

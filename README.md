@@ -31,8 +31,8 @@ The install script checks the archive against `checksums.txt` from the release.
 ## Quick start
 
 1. Run `pillarbox` in a terminal. The home menu opens with Encrypt, Decrypt, Status, Settings, and Help. Set a default key type in Settings, or Encrypt asks on first use and saves that default.
-2. Encrypt a file with `pillarbox lock .env`. That writes `.env.pbx`: a `PBX1` header line plus a standard age payload. You type the secret each time. Save the recovery key when Pillarbox prints it. It shows that key once.
-3. Decrypt with `pillarbox unlock .env.pbx`. It reads the embedded key and asks for the secret. In the TUI, decrypt asks before overwriting an existing original next to the `.pbx`.
+2. Encrypt a file with `pillarbox lock alice.jpg`. That hides the original format and writes `alice.pbx` (dotfiles such as `.env` stay `.env.pbx`; same-stem collisions auto-suffix to `alice-2.pbx`): a `PBX1` header line (carrying the wrapped key and encrypted original filename) plus a standard age payload. You type the secret each time. Save the recovery key when Pillarbox prints it. It shows that key once.
+3. Decrypt with `pillarbox unlock alice.pbx`. It reads the embedded key, asks for the secret, and restores the original filename (`alice.jpg`). Legacy `<name>.<ext>.pbx` files also decrypt as before. In the TUI, decrypt asks before overwriting an existing file.
 
 For scripts, pipe the secret:
 
@@ -67,12 +67,11 @@ Settings includes Theme. Enter opens the theme list. Type to filter by name, the
 
 ## Changelog
 
-### 0.4.0
+### 0.5.0
 
-- Shared 2FA seed for the install, one QR on first 2FA encrypt.
-- Themes in Settings with type-to-filter and apply confirm.
-- Clearer encrypt and decrypt flow: recovery key ack, keep or remove original, overwrite confirm.
-- Help FAQ for Settings vs per-file keys, PIN device secret, and recovery keys.
+- Hide file formats on disk when encrypting (`alice.jpg` → `alice.pbx`, `backup.tar.gz` → `backup.pbx`, dotfiles like `.env` → `.env.pbx`, same-stem collisions auto-suffix to `alice-2.pbx`) with the original filename encrypted in the `PBX1` header and restored on decrypt.
+- Homebrew tap install (`brew install leonardobetti/tap/pillarbox`) via GoReleaser.
+- Bright/white shortcut keys in footers with high contrast across built-in dark and light themes.
 
 Full history: [CHANGELOG.md](CHANGELOG.md).
 

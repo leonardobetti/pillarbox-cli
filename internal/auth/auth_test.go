@@ -77,7 +77,7 @@ func newFixture(t *testing.T, mode keystore.Mode) *fixture {
 		}
 	}
 
-	ks, err := NewInitializer(NewKDF(), keystore.NewWrapper()).Initialize(mode, recipient, identity, secret, deviceSecret, seed, fastParams)
+	ks, err := NewInitializer(NewKDF(), keystore.NewWrapper()).Initialize(mode, recipient, identity, secret, deviceSecret, seed, fastParams, "alice.jpg")
 	if err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
@@ -138,12 +138,15 @@ func TestAuthenticateAllModesRightSecret(t *testing.T) {
 			if mode.Has2FA() {
 				code = codeForStep(t, f.seed, curStep())
 			}
-			got, _, err := f.auth.Authenticate(f.ks, f.secret, code)
+			got, err := f.auth.Authenticate(f.ks, f.secret, code)
 			if err != nil {
 				t.Fatalf("Authenticate with right secret: %v", err)
 			}
-			if string(got) != string(f.identity) {
+			if string(got.Identity) != string(f.identity) {
 				t.Fatal("unwrapped identity differs from the original")
+			}
+			if got.OriginalName != "alice.jpg" {
+				t.Fatalf("OriginalName = %q, want %q", got.OriginalName, "alice.jpg")
 			}
 		})
 	}
@@ -157,7 +160,7 @@ func TestAuthenticateAllModesWrongSecret(t *testing.T) {
 			if mode.Has2FA() {
 				code = codeForStep(t, f.seed, curStep())
 			}
-			_, _, err := f.auth.Authenticate(f.ks, []byte("wrong secret"), code)
+			_, err := f.auth.Authenticate(f.ks, []byte("wrong secret"), code)
 			if !errors.Is(err, ErrAuth) {
 				t.Fatalf("wrong secret: err = %v, want ErrAuth", err)
 			}
@@ -172,7 +175,7 @@ func TestAuthenticateWrongTOTPCode(t *testing.T) {
 	for _, mode := range []keystore.Mode{keystore.ModePassword2FA, keystore.ModePIN2FA} {
 		t.Run(string(mode), func(t *testing.T) {
 			f := newFixture(t, mode)
-			_, _, err := f.auth.Authenticate(f.ks, f.secret, wrongCode(t, f.seed))
+			_, err := f.auth.Authenticate(f.ks, f.secret, wrongCode(t, f.seed))
 			if !errors.Is(err, ErrAuth) {
 				t.Fatalf("wrong TOTP: err = %v, want ErrAuth", err)
 			}
@@ -186,19 +189,20 @@ func TestAuthenticateReusedTOTPStep(t *testing.T) {
 			f := newFixture(t, mode)
 			code := codeForStep(t, f.seed, curStep())
 
-			_, newStep, err := f.auth.Authenticate(f.ks, f.secret, code)
+			res, err := f.auth.Authenticate(f.ks, f.secret, code)
 			if err != nil {
 				t.Fatalf("first use: %v", err)
 			}
 			// Persist the step as PRD 7.4 step 2 says, then replay the code.
+			newStep := res.NewTOTPStep
 			f.ks.LastTOTPStep = &newStep
-			_, _, err = f.auth.Authenticate(f.ks, f.secret, code)
+			_, err = f.auth.Authenticate(f.ks, f.secret, code)
 			if !errors.Is(err, ErrAuth) {
 				t.Fatalf("reused TOTP step: err = %v, want ErrAuth", err)
 			}
 			// A neighboring step is still accepted, FR-08.
 			prev := codeForStep(t, f.seed, newStep-1)
-			if _, _, err := f.auth.Authenticate(f.ks, f.secret, prev); err != nil {
+			if _, err := f.auth.Authenticate(f.ks, f.secret, prev); err != nil {
 				t.Fatalf("previous step rejected: %v", err)
 			}
 		})
@@ -226,11 +230,37 @@ func TestAuthenticateTamperedKeystore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load tampered: %v", err)
 			}
-			_, _, err = f.auth.Authenticate(loaded, f.secret, code)
+			_, err = f.auth.Authenticate(loaded, f.secret, code)
 			if !errors.Is(err, ErrAuth) {
 				t.Fatalf("tampered keystore: err = %v, want ErrAuth", err)
 			}
 		})
+	}
+}
+
+func TestAuthenticateTamperedWrappedName(t *testing.T) {
+	f := newFixture(t, keystore.ModePassword)
+	bad := *f.ks
+	wn := *f.ks.WrappedName
+	ct := append([]byte{}, wn.Ciphertext...)
+	ct[0] ^= 0x01
+	wn.Ciphertext = ct
+	bad.WrappedName = &wn
+	if _, err := f.auth.Authenticate(&bad, f.secret, ""); !errors.Is(err, ErrAuth) {
+		t.Fatalf("tampered wrapped name: err = %v, want ErrAuth", err)
+	}
+}
+
+func TestAuthenticateLegacyWithoutWrappedName(t *testing.T) {
+	f := newFixture(t, keystore.ModePassword)
+	legacy := *f.ks
+	legacy.WrappedName = nil
+	res, err := f.auth.Authenticate(&legacy, f.secret, "")
+	if err != nil {
+		t.Fatalf("legacy authenticate: %v", err)
+	}
+	if res.OriginalName != "" {
+		t.Fatalf("legacy OriginalName = %q, want empty", res.OriginalName)
 	}
 }
 
@@ -251,9 +281,9 @@ func TestKeystoreFileContainsNoSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, leak := range [][]byte{f.identity, f.secret, f.seed} {
+	for _, leak := range [][]byte{f.identity, f.secret, f.seed, []byte("alice.jpg"), []byte(".jpg")} {
 		if bytes.Contains(data, leak) {
-			t.Fatal("keystore.json contains secret material")
+			t.Fatalf("keystore.json leaked %q", leak)
 		}
 	}
 }
@@ -264,7 +294,7 @@ func TestPINModeWithoutDeviceSecretFails(t *testing.T) {
 	if err := os.Remove(filepath.Join(filepath.Dir(f.keystorePath), "device.key")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := f.auth.Authenticate(f.ks, f.secret, "")
+	_, err := f.auth.Authenticate(f.ks, f.secret, "")
 	if !errors.Is(err, ErrAuth) {
 		t.Fatalf("PIN mode without device secret: err = %v, want ErrAuth", err)
 	}

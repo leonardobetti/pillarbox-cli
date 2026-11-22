@@ -84,11 +84,10 @@ func pickATxt(tm *teatest.TestModel, hasCfg bool) {
 	tm.Send(key(tea.KeyEnter))
 }
 
-// pickPBX selects a.txt.pbx: parent, cfg/, a.txt, a.txt.pbx.
+// pickPBX selects a.pbx: parent, cfg/, a.pbx, a.txt.
 func pickPBX(tm *teatest.TestModel) {
 	tm.Send(key(tea.KeyDown)) // parent -> cfg/
-	tm.Send(key(tea.KeyDown)) // cfg/ -> a.txt
-	tm.Send(key(tea.KeyDown)) // a.txt -> a.txt.pbx
+	tm.Send(key(tea.KeyDown)) // cfg/ -> a.pbx
 	tm.Send(key(tea.KeyEnter))
 }
 
@@ -160,7 +159,7 @@ func TestHomeEncryptFileWithOwnKey(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
-	pbx := filepath.Join(deps.StartDir, "a.txt.pbx")
+	pbx := filepath.Join(deps.StartDir, "a.pbx")
 	if _, err := os.Stat(pbx); err != nil {
 		t.Fatalf("no .pbx output: %v", err)
 	}
@@ -197,7 +196,7 @@ func TestHomeEncryptAsksKeyTypeWhenUnset(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
-	ks, err := vault.New().ReadKey(filepath.Join(deps.StartDir, "a.txt.pbx"))
+	ks, err := vault.New().ReadKey(filepath.Join(deps.StartDir, "a.pbx"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +262,7 @@ func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // -> Decrypt
 	waitFor(t, tm, a2, "Select a .pbx file to decrypt")
 	pickPBX(tm)
-	waitFor(t, tm, a2, "a.txt.pbx", "This file needs a passphrase.")
+	waitFor(t, tm, a2, "a.pbx", "This file needs a passphrase.")
 	tm.Type("correct horse battery staple")
 	tm.Send(key(tea.KeyEnter))
 	waitFor(t, tm, a2, "Overwrite existing file?")
@@ -322,7 +321,7 @@ func TestHomeEncryptAuthGate(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
-	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx")); err != nil {
+	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.pbx")); err != nil {
 		t.Fatalf("no .pbx output: %v", err)
 	}
 }
@@ -421,8 +420,8 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 	waitFor(t, tm, a2, "Select a file to encrypt")
 	tm.Send(key(tea.KeyDown)) // parent
 	tm.Send(key(tea.KeyDown)) // cfg
+	tm.Send(key(tea.KeyDown)) // a.pbx
 	tm.Send(key(tea.KeyDown)) // a.txt
-	tm.Send(key(tea.KeyDown)) // a.txt.pbx
 	tm.Send(key(tea.KeyDown)) // b.txt
 	tm.Send(key(tea.KeyEnter))
 	waitFor(t, tm, a2, "Encrypt this file (password+2fa)")
@@ -436,13 +435,13 @@ func TestHome2FAQRCodeAndCopy(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	tm.WaitFinished(t)
 
-	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.txt.pbx")); err != nil {
+	if _, err := os.Stat(filepath.Join(deps.StartDir, "a.pbx")); err != nil {
 		t.Fatalf("no .pbx output: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(deps.StartDir, "b.txt.pbx")); err != nil {
+	if _, err := os.Stat(filepath.Join(deps.StartDir, "b.pbx")); err != nil {
 		t.Fatalf("no second .pbx output: %v", err)
 	}
-	b, err := os.ReadFile(filepath.Join(deps.StartDir, "a.txt.pbx"))
+	b, err := os.ReadFile(filepath.Join(deps.StartDir, "a.pbx"))
 	if err != nil || !strings.HasPrefix(string(b), "PBX1 ") {
 		t.Fatalf("no single-file PBX1 output: %v", err)
 	}

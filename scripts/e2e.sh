@@ -109,13 +109,15 @@ run_mode() {
   say "mode $MODE: lock and unlock a file"
   cp "$FIX/file.txt" "$run/data/file.txt"
   if [ "$(mode_has2fa "$MODE")" = yes ]; then
-    pb_stdin "$run" "$secret" $extra lock "$run/data/file.txt" >/dev/null
-    pb_stdin "$run" "$secret" --totp "$("$TOTPCODE" "$TOTP_SEED" 0)" unlock "$run/data/file.txt.pbx" -o "$run/data/file.out" >/dev/null
+    pb_stdin "$run" "$secret" $extra lock "$run/data/file.txt" --remove-original >/dev/null
+    [ -f "$run/data/file.pbx" ] || fail "mode $MODE: expected hidden-extension output file.pbx"
+    pb_stdin "$run" "$secret" --totp "$("$TOTPCODE" "$TOTP_SEED" 0)" unlock "$run/data/file.pbx" >/dev/null
   else
-    pb_stdin "$run" "$secret" lock "$run/data/file.txt" >/dev/null
-    pb_stdin "$run" "$secret" unlock "$run/data/file.txt.pbx" -o "$run/data/file.out" >/dev/null
+    pb_stdin "$run" "$secret" lock "$run/data/file.txt" --remove-original >/dev/null
+    [ -f "$run/data/file.pbx" ] || fail "mode $MODE: expected hidden-extension output file.pbx"
+    pb_stdin "$run" "$secret" unlock "$run/data/file.pbx" >/dev/null
   fi
-  [ "$(sha256 "$run/data/file.out")" = "$FILE_SUM" ] || fail "mode $MODE: file checksum mismatch"
+  [ "$(sha256 "$run/data/file.txt")" = "$FILE_SUM" ] || fail "mode $MODE: restored file.txt checksum mismatch"
 
   say "mode $MODE: locking a folder exits 2"
   mkdir -p "$run/data/adir"
@@ -129,15 +131,15 @@ run_mode() {
   if [ "$(mode_has2fa "$MODE")" = yes ]; then
     # Offset -1 stays within the accepted +/-1 window and differs from the
     # persisted step of the previous successful unlock.
-    pb_stdin "$run" "$wrong" --totp "$("$TOTPCODE" "$TOTP_SEED" -1)" unlock "$run/data/file.txt.pbx" -o "$run/data/should-not-exist" >/dev/null 2>&1 || rc=$?
+    pb_stdin "$run" "$wrong" --totp "$("$TOTPCODE" "$TOTP_SEED" -1)" unlock "$run/data/file.pbx" -o "$run/data/should-not-exist" >/dev/null 2>&1 || rc=$?
   else
-    pb_stdin "$run" "$wrong" unlock "$run/data/file.txt.pbx" -o "$run/data/should-not-exist" >/dev/null 2>&1 || rc=$?
+    pb_stdin "$run" "$wrong" unlock "$run/data/file.pbx" -o "$run/data/should-not-exist" >/dev/null 2>&1 || rc=$?
   fi
   [ "$rc" -eq 3 ] || fail "mode $MODE: wrong secret gave exit $rc, want 3"
   [ ! -e "$run/data/should-not-exist" ] || fail "mode $MODE: partial output after wrong secret"
 
   say "mode $MODE: tampered file exits 4"
-  cp "$run/data/file.txt.pbx" "$run/data/tampered.pbx"
+  cp "$run/data/file.pbx" "$run/data/tampered.pbx"
   local f="$run/data/tampered.pbx" off byte new
   off=$(( $(wc -c < "$f") - 20 ))  # flip a byte in the age payload, past the PBX1 header
   byte="$(od -An -tu1 -j "$off" -N 1 "$f" | tr -d ' ')"

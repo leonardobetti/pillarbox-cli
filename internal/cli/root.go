@@ -251,10 +251,11 @@ func (d *Deps) keyType() (keystore.Mode, error) {
 }
 
 // buildFileKey creates the per-file key for a new .pbx: secret from the
-// user, device secret for PIN modes, TOTP seed for 2FA modes, and a fresh age
-// identity wrapped under the KEK. The key is embedded in the .pbx header at
-// lock time. It returns the keystore and the raw recovery key.
-func (d *Deps) buildFileKey(mode keystore.Mode) (*keystore.Keystore, string, error) {
+// user, device secret for PIN modes, TOTP seed for 2FA modes, a fresh age
+// identity, and the original basename wrapped under the KEK. The key is
+// embedded in the .pbx header at lock time. It returns the keystore and the
+// raw recovery key.
+func (d *Deps) buildFileKey(mode keystore.Mode, origName string) (*keystore.Keystore, string, error) {
 	secret, err := d.readSecret(false)
 	if err != nil {
 		return nil, "", err
@@ -281,7 +282,7 @@ func (d *Deps) buildFileKey(mode keystore.Mode) (*keystore.Keystore, string, err
 		}
 	}
 	ks, err := auth.NewInitializer(d.KDF, d.Wrapper).Initialize(
-		mode, identity.Recipient().String(), []byte(identity.String()), secret, devSecret, seed, keystore.DefaultArgon2Params)
+		mode, identity.Recipient().String(), []byte(identity.String()), secret, devSecret, seed, keystore.DefaultArgon2Params, origName)
 	if err != nil {
 		return nil, "", &exitError{ExitOther, "cannot build file key"}
 	}
@@ -352,7 +353,7 @@ func (d *Deps) resolveSharedTOTPSeed() ([]byte, error) {
 
 // authenticate runs the unlock flow and maps failures to exit codes: no input
 // is 2, a wrong secret or code is 3.
-func (d *Deps) authenticate(ks *keystore.Keystore) (identity []byte, newStep int64, err error) {
+func (d *Deps) authenticate(ks *keystore.Keystore) (auth.Result, error) {
 	// When prompting on a terminal, state the secret rules before the prompt
 	// so the user is not surprised by a rejection. Scripts using
 	// --secret-stdin get no extra output.
@@ -363,23 +364,23 @@ func (d *Deps) authenticate(ks *keystore.Keystore) (identity []byte, newStep int
 	}
 	secret, err := d.readSecret(false)
 	if err != nil {
-		return nil, 0, err
+		return auth.Result{}, err
 	}
 	code := ""
 	if ks.Mode.Has2FA() {
 		code, err = d.readTOTP()
 		if err != nil {
-			return nil, 0, err
+			return auth.Result{}, err
 		}
 	}
-	id, step, aerr := auth.NewAuthenticator(d.KDF, d.Wrapper, d.DevStore, d.TOTP).Authenticate(ks, secret, code)
+	res, aerr := auth.NewAuthenticator(d.KDF, d.Wrapper, d.DevStore, d.TOTP).Authenticate(ks, secret, code)
 	if errors.Is(aerr, auth.ErrAuth) {
-		return nil, 0, &exitError{ExitAuth, "authentication failed; check the secret and the 2FA code"}
+		return auth.Result{}, &exitError{ExitAuth, "authentication failed; check the secret and the 2FA code"}
 	}
 	if aerr != nil {
-		return nil, 0, &exitError{ExitOther, "authentication error"}
+		return auth.Result{}, &exitError{ExitOther, "authentication error"}
 	}
-	return id, step, nil
+	return res, nil
 }
 
 // mapVaultErr maps vault failures to exit codes, PRD 9.

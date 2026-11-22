@@ -33,15 +33,16 @@ func (e streamErr) Unwrap() error { return e.err }
 
 // LockOptions mirrors the lock flags, PRD section 9.
 type LockOptions struct {
-	Out            string // -o; default <name>.pbx for a file, <dir>.tar.pbx for a folder
+	Out            string // -o; default <stem>.pbx (auto-suffixed on collision unless Force)
 	RemoveOriginal bool   // --remove-original
 	Force          bool   // --force
 }
 
 // UnlockOptions mirrors the unlock flags, PRD section 9.
 type UnlockOptions struct {
-	Out   string // -o
-	Force bool   // overwrite existing paths
+	Out          string // -o
+	OriginalName string // restored basename from keystore (ignored when Out is set)
+	Force        bool   // overwrite existing paths
 }
 
 // Vault runs the lock and unlock pipelines for single files, PRD sections

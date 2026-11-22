@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-22
+
 ### Added
 
 - Homebrew tap distribution (`brew install leonardobetti/tap/pillarbox`) published via GoReleaser.
 
 ### Changed
 
+- Hide original file extensions on disk when encrypting: `alice.jpg` encrypts to `alice.pbx` (and `backup.tar.gz` to `backup.pbx`), dotfiles like `.env` stay `.env.pbx`, and same-stem collisions auto-suffix (`alice-2.pbx`). The original filename is encrypted inside the `PBX1` header under the file's KEK and restored automatically on unlock. Legacy `<name>.<ext>.pbx` files continue to decrypt normally.
 - Keyboard shortcut keys in footers now render in the theme's bright foreground colour (white on Default, high-contrast foreground on built-in dark and light themes) while labels stay dim.
 
 ## [0.4.0] - 2026-11-21

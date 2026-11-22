@@ -133,6 +133,7 @@ type Keystore struct {
 	Recipient       string       `json:"recipient"`
 	WrappedIdentity WrappedKey   `json:"wrapped_identity"`
 	WrappedTOTPSeed *WrappedKey  `json:"wrapped_totp_seed,omitempty"` // 2FA modes only
+	WrappedName     *WrappedKey  `json:"wrapped_name,omitempty"`      // original basename, hidden on disk
 	LastTOTPStep    *int64       `json:"last_totp_step,omitempty"`    // 2FA modes only, replay protection, PRD 7.2
 	CreatedAt       time.Time    `json:"created_at"`
 }

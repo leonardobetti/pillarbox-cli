@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 
 	"filippo.io/age"
@@ -46,14 +47,14 @@ func newUnlockCmd(d *Deps) *cobra.Command {
 }
 
 // runLock encrypts a single file with its own fresh key. The key type comes
-// from Settings (asked in the TUI when unset), the secret unwraps the per-file
-// key, and the wrapped key is stored next to the output as <file>.pbx.key.
+// from Settings (asked in the TUI when unset), the secret wraps the per-file
+// key and original filename, and the header is embedded in the .pbx output.
 func (d *Deps) runLock(path, out string, removeOriginal, force bool) error {
 	mode, err := d.keyType()
 	if err != nil {
 		return err
 	}
-	ks, recovery, err := d.buildFileKey(mode)
+	ks, recovery, err := d.buildFileKey(mode, filepath.Base(path))
 	if err != nil {
 		return err
 	}
@@ -71,9 +72,8 @@ func (d *Deps) runLock(path, out string, removeOriginal, force bool) error {
 	return nil
 }
 
-// runUnlock decrypts a .pbx file with its own key from the sidecar
-// <file>.pbx.key: authenticate against the sidecar, persist the new TOTP
-// step, then stream through vault.Unlock.
+// runUnlock decrypts a .pbx file using its embedded key: authenticate,
+// persist the new TOTP step when needed, then stream through vault.Unlock.
 func (d *Deps) runUnlock(src, out string, force bool) error {
 	if !strings.HasSuffix(src, ".pbx") {
 		return &exitError{ExitUsage, "unlock accepts a .pbx file only"}
@@ -82,21 +82,26 @@ func (d *Deps) runUnlock(src, out string, force bool) error {
 	if err != nil {
 		return err
 	}
-	identityBytes, newStep, err := d.authenticate(ks)
+	res, err := d.authenticate(ks)
 	if err != nil {
 		return err
 	}
 	if ks.Mode.Has2FA() {
-		ks.LastTOTPStep = &newStep
+		step := res.NewTOTPStep
+		ks.LastTOTPStep = &step
 		if err := d.Vault.SaveKey(src, ks); err != nil {
 			d.warn("warning: could not persist the TOTP step")
 		}
 	}
-	id, err := age.ParseX25519Identity(string(identityBytes))
+	id, err := age.ParseX25519Identity(string(res.Identity))
 	if err != nil {
 		return &exitError{ExitOther, "internal error: stored identity is invalid"}
 	}
-	dst, err := d.Vault.Unlock(src, id, vault.UnlockOptions{Out: out, Force: force})
+	dst, err := d.Vault.Unlock(src, id, vault.UnlockOptions{
+		Out:          out,
+		OriginalName: res.OriginalName,
+		Force:        force,
+	})
 	if err != nil {
 		return mapVaultErr(err)
 	}
