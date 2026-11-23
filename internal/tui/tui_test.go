@@ -232,6 +232,35 @@ func TestPickerHidesDotfiles(t *testing.T) {
 	tm.WaitFinished(t)
 }
 
+func TestPickerFiltersPbxByTab(t *testing.T) {
+	deps := testDeps(t)
+	setupSettings(t, deps, keystore.ModePassword)
+	for _, name := range []string{"a.txt", "b.pbx"} {
+		if err := os.WriteFile(filepath.Join(deps.StartDir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tm := teatest.NewTestModel(t, NewHome(deps), teatest.WithInitialTermSize(80, 40))
+	a := &acc{}
+	// Encrypt tab: shows a.txt but not b.pbx.
+	waitFor(t, tm, a, "Select a file to encrypt", "a.txt")
+	if bytes.Contains(a.b, []byte("b.pbx")) {
+		t.Fatal("encrypt picker shows .pbx files")
+	}
+
+	// Decrypt tab: shows b.pbx but not a.txt.
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab}) // -> Decrypt
+	a2 := &acc{}
+	waitFor(t, tm, a2, "Select a .pbx file to decrypt", "b.pbx")
+	if bytes.Contains(a2.b, []byte("a.txt")) {
+		t.Fatal("decrypt picker shows non-.pbx files")
+	}
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.WaitFinished(t)
+}
+
 func TestHomeDecryptOverwritesOriginal(t *testing.T) {
 	deps := testDeps(t)
 	setupSettings(t, deps, keystore.ModePassword)
