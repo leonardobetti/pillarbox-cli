@@ -65,12 +65,21 @@ func (p *Picker) reload() {
 		return
 	}
 	// Dotfiles and dot-directories (.config, .git, ...) stay hidden; the
-	// picker shows conventional files only.
+	// picker shows conventional files only. The encrypt tab also hides
+	// already-encrypted .pbx files, and the decrypt tab shows only .pbx.
 	visible := entries[:0]
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), ".") {
-			visible = append(visible, e)
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
 		}
+		if p.action == "encrypt" && strings.HasSuffix(name, ".pbx") {
+			continue
+		}
+		if p.action == "decrypt" && !e.IsDir() && !strings.HasSuffix(name, ".pbx") {
+			continue
+		}
+		visible = append(visible, e)
 	}
 	entries = visible
 	sort.SliceStable(entries, func(i, j int) bool {
