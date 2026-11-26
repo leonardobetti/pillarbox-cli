@@ -183,7 +183,7 @@ func (m *Home) applyTheme(name string) {
 
 func (m *Home) Init() tea.Cmd { return nil }
 
-// tooSmall is true once the terminal has reported a size below the 800×800px
+// tooSmall is true once the terminal has reported a size below the 720×520px
 // cell budget. Width/height 0 means "not yet known" and is not treated as small.
 func (m *Home) tooSmall() bool {
 	if m.width <= 0 || m.height <= 0 {
@@ -895,7 +895,7 @@ func (m *Home) resizeView() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.th.dim.Render("Terminal too small for this UI."))
 	b.WriteString("\n")
-	fmt.Fprintf(&b, "Need at least %d×%d cells (~800×800px). Now %d×%d.",
+	fmt.Fprintf(&b, "Need at least %d×%d cells (~720×520px). Now %d×%d.",
 		minTermWidth, minTermHeight, m.width, m.height)
 	b.WriteString("\n\n")
 	b.WriteString(renderKeys(m.th, "Resize the window, or press {Q} to quit."))
