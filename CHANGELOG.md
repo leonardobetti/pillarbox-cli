@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-27
+
+### Added
+
+- Filter `.pbx` files in file pickers: the Encrypt tab hides `.pbx` files to avoid re-encrypting already-encrypted files, and the Decrypt tab shows only `.pbx` files (plus directories for navigation). (#7, by Nasser Khalil / `@NasserKK`)
+
 ### Changed
 
-- Lower the minimum terminal size gate from 80×40 (~800×800px) to 72×26 cells (~720×520px), sized around the 2FA QR screen.
-- Revamp `scripts/install.sh` with a colored `PILLARBOX` ASCII banner, step-by-step progress output, and `NO_COLOR`/non-TTY plain-text fallback.
-- Filter `.pbx` files in file pickers: the Encrypt tab hides `.pbx` files to avoid re-encrypting already-encrypted files, and the Decrypt tab shows only `.pbx` files (plus directories for navigation).
+- Lower the minimum terminal size gate from 80×40 (~800×800px) to 72×26 cells (~720×520px), sized around the 2FA QR screen so smaller terminal windows work without breaking layout. (#9, by Nasser Khalil / `@NasserKK`)
+- Revamp `scripts/install.sh` with a colored `PILLARBOX` ASCII banner, step-by-step progress output, and `NO_COLOR`/non-TTY plain-text fallback. (by Leonardo Betti / `@leonardobetti`)
 
 ## [0.5.0] - 2026-11-22
 
