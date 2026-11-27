@@ -9,13 +9,14 @@ import (
 )
 
 // Layout cell budget. minTerm* is the smallest window we render the full UI
-// for — about 800×800 CSS/device pixels at a typical monospace cell
-// (~10×20px). Below that, Home shows a resize hint instead of a broken frame.
+// for — about 720×520 CSS/device pixels at a typical monospace cell
+// (~10×20px). The height floor is set by the 2FA QR screen (18 QR lines +
+// chrome). Below that, Home shows a resize hint instead of a broken frame.
 const (
 	maxWidth      = 78
 	maxHeight     = 24
-	minTermWidth  = 80
-	minTermHeight = 40
+	minTermWidth  = 72
+	minTermHeight = 26
 )
 
 // newRenderer is a var so tests can observe color handling. termenv honours
